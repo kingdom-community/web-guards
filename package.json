@@ -1,0 +1,65 @@
+{
+  "name": "@kingdom-community/web-guards",
+  "version": "0.1.0",
+  "description": "Fail-closed security primitives for small community websites: rate limiting, origin/CSRF checks, __Host- session cookie rules, signed OAuth state, and proxy-aware client addresses.",
+  "license": "MIT",
+  "author": "Daniel McCoy Stephenson",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kingdom-community/web-guards.git"
+  },
+  "homepage": "https://github.com/kingdom-community/web-guards#readme",
+  "bugs": {
+    "url": "https://github.com/kingdom-community/web-guards/issues"
+  },
+  "keywords": [
+    "csrf",
+    "rate-limit",
+    "rate-limiter",
+    "session",
+    "cookies",
+    "oauth",
+    "oauth-state",
+    "x-forwarded-for",
+    "security",
+    "nextjs",
+    "api-routes"
+  ],
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs",
+    "build:esm": "tsc -p tsconfig.build.json && node scripts/writeModuleType.mjs esm",
+    "build:cjs": "tsc -p tsconfig.cjs.json && node scripts/writeModuleType.mjs cjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.9",
+    "typescript": "5.4.5",
+    "vitest": "^1.6.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
