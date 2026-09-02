@@ -12,8 +12,9 @@ Five of them, with no runtime dependencies:
 | `issueState` / `verifyState` | A signed OAuth `state` bound to the session that started the flow. |
 | `clientAddress` | The address a rate limit is keyed on, read correctly from behind a reverse proxy. |
 
-Plus `guards.ts`, which wires the first three into route-level answers (405, 403,
-503, 429) without importing a framework.
+Plus `guards.ts`, which wires the rate limiter, the origin check and the client
+address into route-level answers (405, 403, 503, 429) without importing a
+framework.
 
 Written for Next.js API routes, bound to nothing more than the shape of a
 request and a response. Ships ESM and CommonJS with TypeScript types, strict
