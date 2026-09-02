@@ -139,6 +139,136 @@ describe('the session cookies', () => {
     });
 });
 
+describe('the value cannot end itself and start an attribute', () => {
+    // A `Set-Cookie` header is a value followed by `;`-separated attributes, and
+    // this module builds it by interpolation. So a `;` in a token does not
+    // corrupt the cookie — it ENDS it and begins an attribute of the attacker's
+    // choosing. Until this was checked, the "no cookie is ever domain-scoped"
+    // guarantee above was a property of the tokens that happened to be passed
+    // in rather than of this code.
+
+    it('REFUSES a token that would smuggle in a Domain attribute', () => {
+        expect(() => rules.issued({token: 'jwt; Domain=.evil.example'}, NOW))
+            .toThrow(/cannot appear in a cookie value/);
+    });
+
+    it('refuses it through the escape hatch too, where the browser would store it', () => {
+        // With the __Host- prefix the browser rejects the whole cookie and the
+        // symptom is a silent sign-in failure. Without it — the one case the
+        // hatch exists for — the browser stores a domain-scoped session cookie,
+        // which is precisely the outcome the prefix exists to make impossible.
+        const unprefixed = createSessionCookieRules({
+            sessionCookieName: 'session',
+            refreshCookieName: 'refresh',
+            allowCookieNamesWithoutHostPrefix: true
+        });
+
+        expect(() => unprefixed.issued({token: 'jwt; Domain=.evil.example'}, NOW)).toThrow();
+    });
+
+    it('REFUSES every character that ends a value or a header', () => {
+        for (const token of ['a;b', 'a b', 'a,b', 'a"b', 'a\\b', 'a\rb', 'a\nb', 'a\r\nSet-Cookie: x=y']) {
+            expect(() => rules.issued({token}, NOW)).toThrow();
+        }
+    });
+
+    it('REFUSES an empty token rather than writing a session that is not one', () => {
+        // An empty value reads back through `readCookie` as null, so the caller
+        // has written a signed-in response to a browser holding no session.
+        expect(() => rules.issued({token: ''}, NOW)).toThrow(/No value was given/);
+    });
+
+    it('checks the refresh token by the same rule', () => {
+        expect(() => rules.issued({token: 'jwt', refreshToken: 'r; Domain=.evil.example'}, NOW))
+            .toThrow(/cannot appear in a cookie value/);
+    });
+
+    it('writes neither cookie when only the refresh token is bad', () => {
+        // Not a half-written pair: the session cookie must not reach the browser
+        // on a call that failed.
+        expect(() => rules.issued({token: 'jwt', refreshToken: 'bad;value'}, NOW)).toThrow();
+    });
+
+    it('never repeats the value in the error, because the value is a session token', () => {
+        // An error message carrying a live token is a live token in a log file.
+        expect(() => rules.issued({token: 'secret-jwt; Domain=.evil.example'}, NOW))
+            .toThrow(/cannot appear in a cookie value/);
+
+        let message = '';
+        try {
+            rules.issued({token: 'secret-jwt; Domain=.evil.example'}, NOW);
+        } catch (error) {
+            message = (error as Error).message;
+        }
+
+        expect(message).not.toContain('secret-jwt');
+        expect(message).not.toContain('evil.example');
+    });
+
+    it('names the offending character so the error is actionable', () => {
+        expect(() => rules.issued({token: 'a;b'}, NOW)).toThrow(/";" \(U\+003B\)/);
+        // A control character is named by its code point rather than printed —
+        // printing it would break the log line it lands in.
+        expect(() => rules.issued({token: 'a\nb'}, NOW)).toThrow(/U\+000A/);
+    });
+
+    it('still accepts the values a real upstream returns', () => {
+        // The point is to reject what a cookie cannot carry, not to narrow what
+        // a token may be. `=` in particular stays legal: base64 pads with it,
+        // and only the first `=` in the header separates name from value.
+        const [session, refresh] = rules.issued(
+            {token: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0=.c2ln-_x', refreshToken: 'v1.abc_DEF-123=='},
+            NOW
+        );
+
+        expect(session).toContain('=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0=.c2ln-_x;');
+        expect(refresh).toContain('=v1.abc_DEF-123==;');
+    });
+});
+
+describe('the cookie NAME cannot carry an attribute either', () => {
+    it('REFUSES a name that starts with the prefix and then ends itself', () => {
+        // This one slips past the prefix check: it does start with `__Host-`.
+        // The grammar check is what catches it, which is why it runs first.
+        expect(() => createSessionCookieRules({sessionCookieName: '__Host-a; Domain=.evil.example'}))
+            .toThrow(/not allowed in a cookie name/);
+    });
+
+    it('refuses a bad name through the escape hatch, which waives the prefix and nothing else', () => {
+        expect(() => createSessionCookieRules({
+            sessionCookieName: 'a;b',
+            allowCookieNamesWithoutHostPrefix: true
+        })).toThrow(/not allowed in a cookie name/);
+    });
+
+    it('REFUSES an empty name, and the separators a name may not contain', () => {
+        expect(() => createSessionCookieRules({
+            sessionCookieName: '',
+            allowCookieNamesWithoutHostPrefix: true
+        })).toThrow(/empty/);
+
+        for (const name of ['a b', 'a=b', 'a,b', 'a\tb', 'a(b', 'a/b']) {
+            expect(() => createSessionCookieRules({
+                sessionCookieName: name,
+                allowCookieNamesWithoutHostPrefix: true
+            })).toThrow();
+        }
+    });
+
+    it('checks the refresh cookie name too', () => {
+        expect(() => createSessionCookieRules({refreshCookieName: '__Host-r; Domain=.evil.example'}))
+            .toThrow(/not allowed in a cookie name/);
+    });
+
+    it('accepts the default names and any ordinary one', () => {
+        expect(() => createSessionCookieRules()).not.toThrow();
+        expect(() => createSessionCookieRules({
+            sessionCookieName: '__Host-harborlight_session',
+            refreshCookieName: '__Host-harborlight.refresh'
+        })).not.toThrow();
+    });
+});
+
 describe('clearing the session', () => {
     it('clears both cookies with the attributes they were written with', () => {
         // A browser matches on name, path and security attributes. A clear that
