@@ -34,6 +34,30 @@
 // refuses a cookie name without the prefix rather than letting the guarantee
 // quietly become a convention.
 //
+// THE NAME AND THE VALUE ARE BOTH CHECKED, BECAUSE A `;` ENDS EITHER ONE.
+//
+// A `Set-Cookie` header is a value followed by attributes separated by `;`, and
+// this module builds it by interpolation. So an unchecked `;` anywhere in the
+// token — or in a configured cookie name — does not corrupt the cookie, it ENDS
+// it and starts an attribute. A token of `jwt; Domain=.example.com` produces a
+// header carrying a Domain, which is the one thing the paragraph above promises
+// cannot come out of here. That the promise held at all was a property of the
+// tokens that happened to be passed in, not of this code, and a guarantee that
+// depends on its input being well-behaved is a convention again.
+//
+// So values must match RFC 6265's `cookie-octet` (US-ASCII minus control
+// characters, whitespace, `"`, `,`, `;` and `\`) and names must match the HTTP
+// `token` grammar, and anything else THROWS. The name is checked once, at
+// construction, where the mistake is a configuration line. The value is checked
+// per request, where the only source of a bad one is an upstream returning
+// something this module cannot represent — and answering 500 there is right,
+// because the alternatives are a cookie with an attribute nobody wrote or a
+// session silently written as empty.
+//
+// The thrown error names the offending character and NEVER echoes the value:
+// that value is a live session token, and an error message carrying it is a
+// session token in a log file.
+//
 // (`__Host-` requires `Secure`, and `Secure` cookies work on `http://localhost`
 // in every current browser, because localhost is treated as a trustworthy
 // origin. So this costs nothing in local development.)
@@ -53,6 +77,51 @@
 // logged-in reader's account everywhere that identity is accepted.
 
 export const HOST_COOKIE_PREFIX = '__Host-';
+
+// RFC 6265 §4.1.1 `cookie-octet`: US-ASCII with the characters that would end
+// the value removed — controls (CR and LF start a new header), space, the
+// double quote, the comma, the semicolon and the backslash. Note that `=` is
+// deliberately IN the set: base64 padding is legal inside a value, and only the
+// FIRST `=` in the header separates the name from the value.
+//
+// Spelled out as code-point ranges rather than as a character class, because a
+// class of escaped punctuation is unreadable against the RFC it is supposed to
+// reproduce, and a wrong range here fails silently in the permissive direction.
+const isCookieOctet = (code: number): boolean =>
+    code === 0x21
+    || (code >= 0x23 && code <= 0x2b)
+    || (code >= 0x2d && code <= 0x3a)
+    || (code >= 0x3c && code <= 0x5b)
+    || (code >= 0x5d && code <= 0x7e);
+
+// RFC 6265 §4.1.1 `cookie-name`, which is an HTTP `token`: US-ASCII minus
+// control characters, space, and the separators. `__Host-session` and
+// `__Host-refresh` both satisfy it, as does any name a reasonable person picks.
+const TOKEN_PUNCTUATION = '!#$%&\'*+-.^_`|~';
+
+const isTokenCharacter = (code: number): boolean =>
+    (code >= 0x30 && code <= 0x39)
+    || (code >= 0x41 && code <= 0x5a)
+    || (code >= 0x61 && code <= 0x7a)
+    || TOKEN_PUNCTUATION.includes(String.fromCodePoint(code));
+
+// The offending character, named so the error is actionable — and named as a
+// code point when printing it would be unreadable or would itself break the log
+// line it lands in. Never the value it came out of: see the note above.
+const describeCharacter = (character: string): string => {
+    const code = character.codePointAt(0) ?? 0;
+    const point = `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
+    return code <= 0x20 || code === 0x7f ? point : `"${character}" (${point})`;
+};
+
+const firstDisallowed = (value: string, allowed: (code: number) => boolean): string | null => {
+    for (const character of value) {
+        if (!allowed(character.codePointAt(0) ?? 0)) {
+            return character;
+        }
+    }
+    return null;
+};
 
 export interface IssuedSession {
     token: string;
@@ -153,6 +222,51 @@ export interface SessionCookieRules {
     refreshTokenFrom(cookieHeader: string | undefined | null): string | null;
 }
 
+// Checked at construction, where a bad name is a line of configuration and the
+// right moment to fail is startup. Runs BEFORE the prefix check, because a name
+// like `__Host-a; Domain=.example.com` starts with the prefix and would sail
+// past it while still carrying an attribute into every header this module
+// writes.
+const assertCookieNameIsAToken = (name: string): void => {
+    if (name === '') {
+        throw new Error('A session cookie name is empty. It must be a non-empty HTTP token.');
+    }
+    const offender = firstDisallowed(name, isTokenCharacter);
+    if (offender === null) {
+        return;
+    }
+    throw new Error(
+        `Session cookie name "${name}" contains ${describeCharacter(offender)}, which is not `
+        + 'allowed in a cookie name. A semicolon or a space there would end the name and turn '
+        + 'the rest of it into a cookie attribute. Use letters, digits, and any of '
+        + `${TOKEN_PUNCTUATION} — and keep the "${HOST_COOKIE_PREFIX}" prefix.`
+    );
+};
+
+// Checked per request, on the way into a header. The value is a session token,
+// so it is named in the error only by the character that made it unusable.
+const assertCookieValueIsOctets = (cookieName: string, value: string): void => {
+    // `typeof` as well as the empty check, because the types stop a TypeScript
+    // caller and this package also ships CommonJS to callers who have none.
+    if (typeof value !== 'string' || value === '') {
+        throw new Error(
+            `No value was given for the "${cookieName}" cookie. Writing it anyway would set an `
+            + 'empty cookie, which reads back as no session at all — a signed-out user who was '
+            + 'told they signed in. Answer the request with an error instead.'
+        );
+    }
+    const offender = firstDisallowed(value, isCookieOctet);
+    if (offender === null) {
+        return;
+    }
+    throw new Error(
+        `The value for the "${cookieName}" cookie contains ${describeCharacter(offender)}, which `
+        + 'cannot appear in a cookie value: it would end the value and start an attribute, so the '
+        + 'browser would be sent a cookie nobody wrote. The value itself is not repeated here '
+        + 'because it is a session token. Check what the upstream returned.'
+    );
+};
+
 const assertHostPrefixed = (name: string, allowed: boolean): void => {
     if (allowed || name.startsWith(HOST_COOKIE_PREFIX)) {
         return;
@@ -170,6 +284,11 @@ const assertHostPrefixed = (name: string, allowed: boolean): void => {
 
 export const createSessionCookieRules = (options: SessionCookieOptions = {}): SessionCookieRules => {
     const settings = {...DEFAULTS, ...options};
+    // Grammar first, prefix second. The escape hatch below waives the prefix and
+    // nothing else — there is no option that waives the grammar, because a name
+    // carrying a `;` is not a name a browser would have accepted either.
+    assertCookieNameIsAToken(settings.sessionCookieName);
+    assertCookieNameIsAToken(settings.refreshCookieName);
     assertHostPrefixed(settings.sessionCookieName, settings.allowCookieNamesWithoutHostPrefix);
     assertHostPrefixed(settings.refreshCookieName, settings.allowCookieNamesWithoutHostPrefix);
 
@@ -190,6 +309,14 @@ export const createSessionCookieRules = (options: SessionCookieOptions = {}): Se
         // a rotated refresh token with a stale access token is a session that
         // half-works.
         issued: (session, now = Date.now()) => {
+            // Both values are checked BEFORE either header is built, so a bad
+            // refresh token cannot leave a caller holding a session cookie it
+            // half-wrote. Nothing here is partially applied.
+            assertCookieValueIsOctets(settings.sessionCookieName, session.token);
+            if (session.refreshToken) {
+                assertCookieValueIsOctets(settings.refreshCookieName, session.refreshToken);
+            }
+
             const cookies = [
                 `${settings.sessionCookieName}=${session.token}${attributes(ageFor(session.expiresAt, now))}`
             ];

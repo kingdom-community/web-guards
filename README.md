@@ -204,6 +204,18 @@ same reason — so the guarantee cannot quietly decay back into a convention. Th
 `www` case belongs in a redirect to the canonical host, which is where it is
 actually solvable.
 
+That guarantee also has to survive the values passed *through* it. A `Set-Cookie`
+header is a value followed by `;`-separated attributes, so a `;` inside a token
+does not corrupt the cookie — it *ends* it and starts an attribute. A token of
+`jwt; Domain=.evil.example` would produce a header carrying a `Domain`, which is
+the exact thing the prefix is here to prevent. So `issued()` refuses a value that
+is empty or that contains anything outside RFC 6265's `cookie-octet` set, and
+`createSessionCookieRules` refuses a name that is not an HTTP token — which also
+catches `__Host-a; Domain=.evil.example`, a name that passes the prefix check on
+a technicality. The thrown error names the offending character and never repeats
+the value, because that value is a live session token and error messages end up
+in logs.
+
 (`Secure` cookies work on `http://localhost` in every current browser, so none of
 this costs you anything in local development.)
 
