@@ -68,4 +68,67 @@ describe('clientAddress', () => {
         expect(clientAddress({headers: {'x-forwarded-for': ['1.2.3.4', '198.51.100.9, 203.0.113.7']}}))
             .toBe('203.0.113.7');
     });
+
+    it('produces a key rather than throwing when a header arrives as an empty array', () => {
+        // Nothing in the array to be the last hop, so it is the same case as an
+        // absent header — the socket, and failing that the shared bucket.
+        expect(clientAddress({headers: {'x-forwarded-for': []}, socketAddress: '172.18.0.4'}))
+            .toBe('172.18.0.4');
+        expect(clientAddress({headers: {'x-real-ip': [], 'x-forwarded-for': []}}))
+            .toBe(UNKNOWN_CLIENT_ADDRESS);
+    });
+
+    it('treats a present but blank X-Real-Ip as absent rather than as the answer', () => {
+        // A proxy that sets the header unconditionally sets it empty when it has
+        // nothing to put there. Keying on '' would bucket those requests
+        // together under a name that looks like an address.
+        expect(clientAddress({
+            headers: {'x-real-ip': '   ', 'x-forwarded-for': '198.51.100.9, 203.0.113.7'}
+        })).toBe('203.0.113.7');
+    });
+});
+
+// The header bag this module takes is a structural record, not Node's
+// `IncomingHttpHeaders`. Node lower-cases what it hands up; a caller that does
+// not — another framework, an edge runtime, a hand-built test double — spells
+// the header the way the wire did.
+//
+// The consequence of missing it is not "no address". It is the socket peer,
+// which behind a proxy is the proxy: every visitor on the internet in one
+// bucket, and the first abuser to spend the budget locks out the site. So the
+// assertions below all carry a socket address, and the point of each is that the
+// socket address is NOT what comes back.
+describe('a header name spelled the way the wire spelled it', () => {
+    it('is read whatever its capitalisation, rather than falling through to the socket', () => {
+        expect(clientAddress({headers: {'X-Real-Ip': '203.0.113.7'}, socketAddress: '172.18.0.4'}))
+            .toBe('203.0.113.7');
+        expect(clientAddress({headers: {'X-REAL-IP': '203.0.113.7'}, socketAddress: '172.18.0.4'}))
+            .toBe('203.0.113.7');
+    });
+
+    it('still gets the LAST X-Forwarded-For entry, not the first', () => {
+        // The capitalised spelling must not quietly become a second, weaker
+        // implementation of the one rule this file exists to hold.
+        expect(clientAddress({
+            headers: {'X-Forwarded-For': '1.2.3.4, 203.0.113.7'},
+            socketAddress: '172.18.0.4'
+        })).toBe('203.0.113.7');
+    });
+
+    it('keeps X-Real-Ip ahead of X-Forwarded-For however either is spelled', () => {
+        expect(clientAddress({
+            headers: {'X-Forwarded-For': '1.2.3.4', 'x-real-ip': '203.0.113.7'}
+        })).toBe('203.0.113.7');
+        expect(clientAddress({
+            headers: {'x-forwarded-for': '1.2.3.4', 'X-Real-Ip': '203.0.113.7'}
+        })).toBe('203.0.113.7');
+    });
+
+    it('prefers the exact lower-case spelling, which is the one Node produces', () => {
+        // Both spellings present is not a request any proxy makes; it is pinned
+        // so the resolution is a decision rather than an accident of key order.
+        expect(clientAddress({
+            headers: {'x-real-ip': '203.0.113.7', 'X-Real-Ip': '1.2.3.4'}
+        })).toBe('203.0.113.7');
+    });
 });

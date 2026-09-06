@@ -305,7 +305,19 @@ that either does nothing or takes your site down, and it reports neither.
   each proxy *appends* to and the client writes the beginning of it.
 
 `clientAddress` reads `X-Real-Ip`, and failing that the **last** entry of
-`X-Forwarded-For`. Two things it cannot verify for itself, and you must:
+`X-Forwarded-For`. Failing both — a direct connection, local development, or a
+request that reached the container without passing the proxy — it reads the
+socket peer, and failing that it returns `UNKNOWN_CLIENT_ADDRESS`, the string
+`unknown`.
+
+That last step is a shared bucket, not a hole. Returning null and skipping the
+limit would make "send no headers" the way around every budget on the site, so an
+unidentifiable request is rate-limited together with every other unidentifiable
+request instead. Blank and whitespace-only header values count as absent and fall
+through the same chain, and either header name is matched whatever its
+capitalisation.
+
+Two things it cannot verify for itself, and you must:
 
 - Your proxy must trust only itself for forwarded headers — Traefik's
   `forwardedHeaders.trustedIPs`, nginx's `set_real_ip_from`, and so on. Without
