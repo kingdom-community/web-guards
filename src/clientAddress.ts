@@ -18,7 +18,14 @@
 //
 // So: read `X-Real-Ip`, which a proxy sets to the address it saw; failing that,
 // the LAST entry of `X-Forwarded-For`, which is the one the nearest proxy
-// appended and the only one the client could not choose.
+// appended and the only one the client could not choose. Failing both, the
+// socket peer, and failing that a shared `unknown` key — never nothing, because
+// an unkeyed request is an unlimited one.
+//
+// Both header names are matched WITHOUT REGARD TO CASE. Node lower-cases them,
+// but the header bag this module takes is a structural record rather than
+// Node's, and a caller that spells one `X-Real-Ip` must not silently drop
+// through to the socket peer for it.
 //
 // TWO DEPENDENCIES THIS FILE CANNOT CHECK FOR ITSELF
 //
@@ -48,14 +55,38 @@ export interface AddressSource {
 // every other such request, which is the conservative direction to fail in.
 export const UNKNOWN_CLIENT_ADDRESS = 'unknown';
 
+// `name` is given already lower-cased. The direct lookup answers every request
+// that arrived through Node, which lower-cases incoming header names, so the
+// common path costs one property read. The scan behind it is for a caller whose
+// framework or test harness did not: `headers` here is a structural record
+// rather than Node's `IncomingHttpHeaders`, so `X-Real-Ip` is a spelling this
+// module can be handed. Not finding it would not read as an error — it would
+// fall through to the socket peer below, which behind a proxy is the proxy, and
+// that is the whole-site outage described at the top of this file arriving
+// silently.
+const rawHeaderValue = (
+    headers: AddressSource['headers'],
+    name: string
+): string | string[] | undefined => {
+    if (name in headers) {
+        return headers[name];
+    }
+    for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === name) {
+            return headers[key];
+        }
+    }
+    return undefined;
+};
+
 const headerValue = (headers: AddressSource['headers'], name: string): string | null => {
-    const raw = headers[name] ?? headers[name.toLowerCase()];
+    const raw = rawHeaderValue(headers, name);
     if (raw === undefined) {
         return null;
     }
-    // Node lower-cases incoming header names and joins repeats for most headers,
-    // but a header that appears more than once can arrive as an array. The last
-    // element of the last one is still the last hop.
+    // Node joins repeats for most headers, but a header that appears more than
+    // once can arrive as an array. The last element of the last one is still the
+    // last hop.
     const value = Array.isArray(raw) ? raw[raw.length - 1] : raw;
     const trimmed = (value ?? '').trim();
     return trimmed === '' ? null : trimmed;
