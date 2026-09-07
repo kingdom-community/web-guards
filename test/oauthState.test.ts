@@ -1,3 +1,5 @@
+import {createHmac} from 'node:crypto';
+
 import {describe, expect, it} from 'vitest';
 
 import {issueState, STATE_TTL_MS, verifyState} from '../src/oauthState.js';
@@ -8,6 +10,20 @@ import {issueState, STATE_TTL_MS, verifyState} from '../src/oauthState.js';
 // misconfiguration.
 
 const SECRET = 'a-secret-nobody-else-has-0123456789';
+
+// A state built the way this module built them BEFORE empty subjects were
+// refused — the same payload shape, signed with the same secret, so it is
+// genuine in every respect a signature can attest to. It stands in for the
+// states that were already sitting in browsers when the rule arrived, and for
+// any copy of this module that has not adopted it.
+const stateSignedFor = (subject: string, expiresAt: number): string => {
+    const base64url = (value: string): string =>
+        value.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const encoded = base64url(
+        Buffer.from(JSON.stringify({n: 'a-nonce', u: subject, e: expiresAt}), 'utf8').toString('base64')
+    );
+    return `${encoded}.${base64url(createHmac('sha256', SECRET).update(encoded).digest('base64'))}`;
+};
 
 describe('issuing a state', () => {
     it('produces a signed, opaque value', () => {
@@ -33,6 +49,27 @@ describe('issuing a state', () => {
         expect(issueState('alice', undefined)).toBeNull();
         expect(issueState('alice', '')).toBeNull();
         expect(issueState('alice', '   ')).toBeNull();
+    });
+
+    it('REFUSES A SUBJECT THAT BINDS TO NOTHING', () => {
+        // `issueState(session?.user ?? '', secret)` is ordinary defensive code,
+        // and the state it used to produce verified against every other caller
+        // who also had nobody. There is no account here to bind to, so no state
+        // is issued.
+        expect(issueState('', SECRET)).toBeNull();
+        expect(issueState('   ', SECRET)).toBeNull();
+        expect(issueState('\t\n ', SECRET)).toBeNull();
+    });
+
+    it('does not trim or otherwise rewrite a subject it accepts', () => {
+        // The emptiness test trims; the value signed does not. A subject that
+        // survives the check is bound byte for byte, so nothing about an
+        // existing non-empty identifier changes meaning.
+        const state = issueState(' alice ', SECRET) as string;
+
+        expect(state).toBeTruthy();
+        expect(verifyState(state, ' alice ', SECRET)).toEqual({ok: true, subject: ' alice '});
+        expect(verifyState(state, 'alice', SECRET)).toEqual({ok: false, reason: 'wrong-session'});
     });
 });
 
@@ -129,5 +166,49 @@ describe('verifying a state', () => {
 
         expect(verifyState([state, 'junk'], 'alice', SECRET)).toEqual({ok: true, subject: 'alice'});
         expect(verifyState(['junk', state], 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('REFUSES A STATE SIGNED FOR AN EMPTY SUBJECT, WHATEVER IT IS PRESENTED WITH', () => {
+        // The bug in full: this state is unexpired and correctly signed, and it
+        // used to verify — returning {ok: true, subject: ''} — against any
+        // caller who also had nobody. Two unauthenticated browsers shared one
+        // subject and either could finish the other's flow.
+        const legacy = stateSignedFor('', 2_000_000);
+
+        expect(verifyState(legacy, '', SECRET, 1_000_000)).toEqual({ok: false, reason: 'unbound'});
+        expect(verifyState(legacy, '   ', SECRET, 1_000_000)).toEqual({ok: false, reason: 'unbound'});
+        expect(verifyState(legacy, 'alice', SECRET, 1_000_000)).toEqual({ok: false, reason: 'unbound'});
+    });
+
+    it('refuses a whitespace-only subject signed the same way', () => {
+        const legacy = stateSignedFor('   ', 2_000_000);
+
+        expect(verifyState(legacy, '   ', SECRET, 1_000_000)).toEqual({ok: false, reason: 'unbound'});
+    });
+
+    it('REFUSES A CALLBACK FROM A SESSION WITH NO ACCOUNT, however good the state', () => {
+        // The other end of the same fact. The state here is one this site
+        // issued to a real account; the browser presenting it has nobody, so
+        // there is nothing for the binding to hold.
+        const state = issueState('alice', SECRET) as string;
+
+        expect(verifyState(state, '', SECRET)).toEqual({ok: false, reason: 'unbound'});
+        expect(verifyState(state, '   ', SECRET)).toEqual({ok: false, reason: 'unbound'});
+    });
+
+    it('reports an accountless session ahead of a bad state, and an unset secret ahead of both', () => {
+        // Precedence, pinned deliberately. A route calling this with no account
+        // has a problem of its own, and saying so is more use to an operator
+        // than a verdict about the state. An unset secret still outranks it:
+        // nothing can be checked at all.
+        expect(verifyState(undefined, '', SECRET)).toEqual({ok: false, reason: 'unbound'});
+        expect(verifyState('not-a-state', '', SECRET)).toEqual({ok: false, reason: 'unbound'});
+        expect(verifyState('not-a-state', '', undefined)).toEqual({ok: false, reason: 'not-configured'});
+    });
+
+    it('still refuses an accountless session when the state is signed by somebody else', () => {
+        const foreign = issueState('mallory', 'some-other-secret') as string;
+
+        expect(verifyState(foreign, '', SECRET)).toEqual({ok: false, reason: 'unbound'});
     });
 });

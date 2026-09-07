@@ -121,15 +121,17 @@ And the OAuth `state`, for linking a Discord or GitHub account:
 ```ts
 import {issueState, verifyState} from '@kingdom-community/web-guards';
 
-// Starting the flow. Null means the secret is unset: answer 503 rather than
-// sending an unsigned state to the provider.
+// Starting the flow. Null means no state can be issued: the secret is unset, so
+// answer 503 rather than send an unsigned state to the provider — or there is
+// no signed-in account, and an empty subject would bind the flow to nobody.
 const state = issueState(session.username, process.env.OAUTH_STATE_SECRET);
 
 // Finishing it, in the callback route.
 const verdict = verifyState(request.query.state, session.username, process.env.OAUTH_STATE_SECRET);
 if (!verdict.ok) {
     // 'wrong-session' is the attack; 'expired' is a person who left the tab
-    // open. Different log lines, identical answer to the visitor.
+    // open; 'unbound' is a flow with no account on one side or the other.
+    // Different log lines, identical answer to the visitor.
 }
 ```
 

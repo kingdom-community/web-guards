@@ -39,6 +39,27 @@
 // The signature means no server-side state table is needed for a flow that is
 // over in seconds, and no cleanup job for the rows it would leave behind.
 
+// AN EMPTY SUBJECT IS NOT AN IDENTIFIER, IT IS THE ABSENCE OF ONE.
+//
+// The binding is a comparison, and a comparison against a value meaning
+// "nobody" succeeds for everybody else who also has nobody. A state issued for
+// `''` verifies against a session subject of `''`, so two unauthenticated
+// browsers share one subject and either can finish the other's flow — the
+// attack described above, reached without forging anything. The shape that
+// produces it is ordinary defensive code in a route: `issueState(session?.user
+// ?? '', secret)`, or a subject read out of a request body, where a field that
+// is absent or not a string reads back as the empty string.
+//
+// So an empty — or whitespace-only — subject is refused at BOTH ends. Issuing
+// returns null, and verifying returns `unbound` whatever was signed, which is
+// what makes a state issued before this rule existed unredeemable rather than
+// merely unissuable: refusing only at the issuing end would leave every state
+// already in a browser good for its full lifetime.
+//
+// Neither end rewrites a subject that survives the check. The emptiness test
+// trims, the stored and compared value never does, so anything non-empty is
+// signed and matched byte for byte exactly as before.
+
 import {createHmac, randomBytes, timingSafeEqual} from 'node:crypto';
 
 // How long a `state` stays valid by default. A person clicking through a consent
@@ -47,9 +68,17 @@ import {createHmac, randomBytes, timingSafeEqual} from 'node:crypto';
 // is worthless by the time anybody reads it.
 export const STATE_TTL_MS = 10 * 60 * 1000;
 
+// `unbound` is the verdict for a flow that has no account on one side or the
+// other: a state signed for an empty subject, or a callback presented with an
+// empty session subject. It is deliberately NOT folded into `wrong-session`,
+// which tells an operator that two identified accounts did not match — a
+// different fact, and a different thing to go and look at.
 export type StateVerdict =
     | {ok: true; subject: string}
-    | {ok: false; reason: 'not-configured' | 'malformed' | 'bad-signature' | 'expired' | 'wrong-session'};
+    | {
+        ok: false;
+        reason: 'not-configured' | 'malformed' | 'bad-signature' | 'expired' | 'wrong-session' | 'unbound';
+    };
 
 // base64url, by hand rather than by dependency: two replaces and a strip.
 const encode = (value: string): string =>
@@ -71,11 +100,27 @@ const equals = (a: string, b: string): boolean => {
     return left.length === right.length && timingSafeEqual(left, right);
 };
 
+// Whether a subject would bind the state to nothing. Whitespace-only counts:
+// `' '` is no more an account than `''` is, and the check matches how an unset
+// secret is recognised a few lines down. The `typeof` guard is for callers
+// reaching this from JavaScript, where the parameter type is a suggestion.
+const bindsToNothing = (subject: unknown): boolean =>
+    typeof subject !== 'string' || subject.trim() === '';
+
 // A `state` for a flow started by `subject`, which should be a stable account
-// identifier and never the session token. Null when the secret is unset, which
-// is the caller's cue to answer 503 rather than to start a flow it cannot
-// finish — an unsigned state is the one thing this flow must never send to the
-// provider.
+// identifier and never the session token.
+//
+// Null when no state can be issued, which happens for two reasons. The secret
+// is unset: answer 503 rather than start a flow that cannot be finished — an
+// unsigned state is the one thing this flow must never send to the provider.
+// Or `subject` is empty or whitespace-only: there is no account to bind to, so
+// there is nobody to start a link for, and the answer belongs on the sign-in
+// path rather than at the provider.
+//
+// One null for both is not an ambiguity the caller has to live with. It holds
+// both arguments and can tell them apart before it ever calls: a secret it did
+// not configure is its own deployment, a subject it does not have is its own
+// session.
 export const issueState = (
     subject: string,
     secret: string | undefined,
@@ -83,6 +128,12 @@ export const issueState = (
     ttlMs: number = STATE_TTL_MS
 ): string | null => {
     if (!secret || secret.trim() === '') {
+        return null;
+    }
+    // Refused here so an unbindable state never reaches a browser, and refused
+    // again in `verifyState` so the ones issued before this rule existed cannot
+    // be redeemed either.
+    if (bindsToNothing(subject)) {
         return null;
     }
     // The nonce makes two states issued in the same millisecond for the same
@@ -114,6 +165,13 @@ export const verifyState = (
     if (!secret || secret.trim() === '') {
         return {ok: false, reason: 'not-configured'};
     }
+    // Before the state is looked at at all: a caller with no account cannot be
+    // the account a flow was started as. Checked against the session rather
+    // than against the payload because it is a fact about this request, and
+    // true however well-formed and well-signed the state turns out to be.
+    if (bindsToNothing(sessionSubject)) {
+        return {ok: false, reason: 'unbound'};
+    }
     const raw = Array.isArray(state) ? state[0] : state;
     if (!raw || typeof raw !== 'string') {
         // A callback with NO state at all is the case a naive implementation
@@ -144,6 +202,14 @@ export const verifyState = (
     }
     if (typeof payload.u !== 'string' || typeof payload.e !== 'number') {
         return {ok: false, reason: 'malformed'};
+    }
+    // Not `malformed`: this is a payload this module used to write, so a state
+    // carrying it is genuine and correctly signed. It is refused because what
+    // it is bound to is nobody — which is the whole point of checking here as
+    // well as at issue time. Ahead of the expiry check, because an unbindable
+    // state is refused for the whole of its life and not only after it.
+    if (bindsToNothing(payload.u)) {
+        return {ok: false, reason: 'unbound'};
     }
     if (payload.e <= now) {
         return {ok: false, reason: 'expired'};
