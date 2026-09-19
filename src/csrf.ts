@@ -30,6 +30,19 @@
 //      security control has to be loud, and there is no third option where it is
 //      silently ignored.
 //
+//      "Unset" includes a base URL that parses but has NO ORIGIN TO COMPARE. The
+//      URL standard gives `file:`, `data:`, `about:` and every scheme it does
+//      not know an opaque origin, and `URL.prototype.origin` spells that as the
+//      string `"null"` — a truthy value, so a naive `new URL(base).origin` hands
+//      it back as if it were a real one. The spelling that produces it in
+//      practice is a base URL with its scheme left off: `localhost:3000` parses
+//      with `localhost` as the scheme. A site so deployed would refuse every
+//      browser (`https://…` never equals `"null"`) and ACCEPT any hand-written
+//      client sending an `Origin` of `about:blank` or `foo:bar`, whose origin is
+//      the same `"null"`. So an opaque origin is treated as no origin on both
+//      sides: as a base URL it is `not-configured`, and as a header it is the
+//      same absent-header that the literal `Origin: null` already is.
+//
 // Note the deliberate asymmetry with everything else that reads the same
 // setting. Somewhere else in your codebase, the base URL probably falls back to
 // `http://localhost:3000` — for canonical link tags, say. That is correct there
@@ -54,15 +67,25 @@ export interface OriginCheckInput {
 const first = (value: string | string[] | undefined): string | undefined =>
     Array.isArray(value) ? value[0] : value;
 
+// The serialization the URL standard gives an opaque origin. It is a string, not
+// a null, and it is what `new URL('localhost:3000').origin` returns.
+const OPAQUE_ORIGIN = 'null';
+
+// The origin of a URL, or null when there is nothing to compare: the value is
+// absent, does not parse, or parses to an opaque origin. The last case is
+// checked explicitly because it comes back looking like success — see edge two
+// above.
 const originOf = (url: string | undefined): string | null => {
     if (!url || url.trim() === '') {
         return null;
     }
+    let origin: string;
     try {
-        return new URL(url.trim()).origin;
+        origin = new URL(url.trim()).origin;
     } catch {
         return null;
     }
+    return origin === OPAQUE_ORIGIN ? null : origin;
 };
 
 export const checkRequestOrigin = (input: OriginCheckInput): OriginVerdict => {

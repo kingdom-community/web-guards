@@ -181,6 +181,12 @@ Two cases fail *open* in the obvious implementation. Both are closed here:
    comparison happens to be written. Neither is acceptable, so an unset base URL
    *disables the route* (503) rather than *disabling the check*. There is no
    third option where a misconfiguration silently removes a security control.
+   "Unset" includes a base URL that parses but has no origin to compare — the
+   scheme left off (`localhost:3000` parses with `localhost` as the scheme), or
+   a `file:`, `data:` or `about:` URL. The URL standard gives those an *opaque*
+   origin, spelled as the string `"null"`, and a naive check would accept any
+   client whose `Origin` spells the same thing. Here it is `not-configured`,
+   and an `Origin` header with an opaque origin counts as absent.
 
 ## Why `__Host-` is load-bearing
 

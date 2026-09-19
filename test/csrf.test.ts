@@ -78,6 +78,21 @@ describe('fail-closed edge one: neither Origin nor Referer', () => {
             .toEqual({ok: false, reason: 'missing-origin'});
     });
 
+    it('REFUSES the same opaque origin when it is spelled as a URL', () => {
+        // `about:blank`, `file:` and any scheme the URL standard does not know
+        // parse fine and come back with an origin of `"null"` — the string, not
+        // the value. That is the opaque origin above wearing a different
+        // spelling, and it gets the same verdict: no origin, not "no opinion".
+        expect(checkRequestOrigin({origin: 'about:blank', baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+        expect(checkRequestOrigin({origin: 'file:///srv/site/index.html', baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+        expect(checkRequestOrigin({origin: 'foo:bar', baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+        expect(checkRequestOrigin({referer: 'data:text/html,<form>', baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+    });
+
     it('does not accept a request whose only usable header is an empty array', () => {
         // Repeated headers arrive as arrays in Node; an empty one is still no
         // header.
@@ -112,6 +127,8 @@ describe('fail-closed edge one: neither Origin nor Referer', () => {
             .toEqual({ok: true});
         expect(checkRequestOrigin({origin: 'null', referer: `${BASE_URL}/login`, baseUrl: BASE_URL}))
             .toEqual({ok: true});
+        expect(checkRequestOrigin({origin: 'about:blank', referer: `${BASE_URL}/login`, baseUrl: BASE_URL}))
+            .toEqual({ok: true});
     });
 });
 
@@ -136,6 +153,45 @@ describe('fail-closed edge two: the base URL is unset', () => {
             .toEqual({ok: false, reason: 'not-configured'});
         expect(checkRequestOrigin({origin: BASE_URL, baseUrl: 'undefined'}))
             .toEqual({ok: false, reason: 'not-configured'});
+    });
+
+    it('reports not-configured for a base URL that parses but has no origin', () => {
+        // The realistic spelling is the scheme left off: `localhost:3000` parses
+        // with `localhost` as the scheme and comes back with an opaque origin,
+        // which `URL.prototype.origin` serializes as the truthy string `"null"`.
+        // A naive check would keep that as the expected origin and compare
+        // against it. There is nothing to compare, so it is unset.
+        expect(checkRequestOrigin({origin: BASE_URL, baseUrl: 'localhost:3000'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({origin: BASE_URL, baseUrl: 'harborlight.example:443'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({origin: BASE_URL, baseUrl: 'file:///srv/site'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({origin: BASE_URL, baseUrl: 'about:blank'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({origin: BASE_URL, baseUrl: 'data:text/plain,x'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({origin: BASE_URL, baseUrl: 'mailto:ops@harborlight.example'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+    });
+
+    it('does not let two opaque origins match each other', () => {
+        // The fail-open this row exists for. With the scheme-less base URL, a
+        // browser's `https://…` Origin never matches and reads as a rejected
+        // request — while a hand-written client sending an Origin or Referer
+        // that also has an opaque origin would compare `"null"` to `"null"` and
+        // be let in. The verdict has to be the operator's problem, not a match
+        // and not the client's.
+        expect(checkRequestOrigin({origin: 'about:blank', baseUrl: 'localhost:3000'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({origin: 'localhost:3000', baseUrl: 'localhost:3000'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({origin: 'foo:bar', baseUrl: 'localhost:3000'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(checkRequestOrigin({referer: 'file:///etc/hosts', baseUrl: 'file:///srv/site'}))
+            .toEqual({ok: false, reason: 'not-configured'});
+        expect(originVerdictStatus(checkRequestOrigin({origin: 'about:blank', baseUrl: 'localhost:3000'})))
+            .toBe(503);
     });
 
     it('refuses even a request that would otherwise be perfectly valid', () => {
