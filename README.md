@@ -272,6 +272,12 @@ They were derived against an upstream that allowed 20 requests per minute
 upstream at all, **the numbers are the wrong ones and the method is the right
 one.**
 
+If you read your own numbers from the environment, `RateLimiter` throws at
+construction on a `limit`, `windowMs`, `lockoutMs` or `maxKeys` that is not a
+finite number in range. `Number(undefined)` is `NaN`, every comparison with `NaN`
+is false, and a limiter whose limit is `NaN` would otherwise allow every request
+and never say so. An optional field passed as `undefined` takes its default.
+
 Budgets with no upstream ceiling — posting a thread, replying, moderation
 actions — are a different problem. Nothing behind them limits by address, so the
 goal is not to stop a determined attacker: it is to make flooding tedious enough
