@@ -87,9 +87,10 @@ const requireNumber = (field: keyof LimiterConfig, value: unknown, minimum: numb
     }
     throw new Error(
         `RateLimiter ${field} must be a finite number of at least ${minimum}, but was `
-        + `${describeValue(value)}. A budget that cannot be compared refuses nothing, so the `
-        + 'limiter is not built rather than built switched off. If the value comes from an '
-        + 'environment variable, check that it is set and numeric.'
+        + `${describeValue(value)}. A budget outside that range does not limit what it says it `
+        + 'limits — a NaN one refuses nothing at all — so the limiter is not built rather than '
+        + 'built wrong. If the value comes from an environment variable, check that it is set '
+        + 'and numeric.'
     );
 };
 
