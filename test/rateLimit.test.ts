@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {RateLimiter} from '../src/rateLimit.js';
+import {RateLimiter, type LimiterConfig} from '../src/rateLimit.js';
 import {
     ASSUMED_UPSTREAM_REQUESTS_PER_MINUTE,
     recommendedAuthLimits
@@ -131,6 +131,71 @@ describe('the injected clock', () => {
         limiter.consume('a', START);
 
         expect(limiter.check('a', START - 5_000).allowed).toBe(false);
+    });
+});
+
+describe('a budget that cannot be applied is refused at startup', () => {
+    // Every comparison with NaN is false, and the limiter refuses only when a
+    // comparison comes out true. A budget read from an unset environment variable
+    // would otherwise build a limiter that allows everything and says nothing.
+    // The casts stand in for a CommonJS caller, whom the types do not stop.
+    const build = (config: Record<string, unknown>) => (): RateLimiter =>
+        new RateLimiter(config as unknown as LimiterConfig);
+
+    const unusable = [undefined, null, NaN, '10', 0, -1, Infinity];
+
+    it('refuses a limit that is absent, not a number, not finite, or below one', () => {
+        for (const limit of unusable) {
+            expect(build({limit, windowMs: 60_000})).toThrow(/RateLimiter limit /);
+        }
+        expect(build({windowMs: 60_000})).toThrow(/RateLimiter limit /);
+    });
+
+    it('refuses a window that is absent, not a number, not finite, or not positive', () => {
+        for (const windowMs of unusable) {
+            expect(build({limit: 1, windowMs})).toThrow(/RateLimiter windowMs /);
+        }
+        expect(build({limit: 1})).toThrow(/RateLimiter windowMs /);
+    });
+
+    it('refuses a lockout that is given but unusable, instead of quietly having none', () => {
+        for (const lockoutMs of [NaN, '900000', -1, Infinity]) {
+            expect(build({limit: 1, windowMs: 60_000, lockoutMs})).toThrow(/RateLimiter lockoutMs /);
+        }
+    });
+
+    it('refuses a key bound that is given but unusable', () => {
+        for (const maxKeys of [NaN, '10', 0, -1, Infinity]) {
+            expect(build({limit: 1, windowMs: 60_000, maxKeys})).toThrow(/RateLimiter maxKeys /);
+        }
+    });
+
+    it('names the value it was given, so the log says which setting to fix', () => {
+        expect(build({limit: NaN, windowMs: 60_000})).toThrow(/but was NaN\./);
+        expect(build({limit: '10', windowMs: 60_000})).toThrow(/but was "10"\./);
+    });
+
+    it('treats an explicitly undefined maxKeys as the default, so the map stays bounded', () => {
+        // The spelling `{maxKeys: process.env.X ? Number(process.env.X) : undefined}`
+        // typechecks. It must mean "use the default", not "no bound at all".
+        const limiter = new RateLimiter({limit: 5, windowMs: 60_000, maxKeys: undefined});
+
+        for (let i = 0; i < 10_050; i++) {
+            limiter.consume(`address-${i}`, START);
+        }
+
+        expect(limiter.size()).toBeLessThanOrEqual(10_001);
+    });
+
+    it('treats an explicitly undefined lockoutMs as no lockout, the documented default', () => {
+        const limiter = new RateLimiter({limit: 1, windowMs: 60_000, lockoutMs: undefined});
+        limiter.consume('a', START);
+
+        expect(limiter.consume('a', START + 60_000).allowed).toBe(true);
+    });
+
+    it('accepts a lockout of zero, which is how a caller spells "none"', () => {
+        expect(build({limit: 1, windowMs: 60_000, lockoutMs: 0})).not.toThrow();
     });
 });
 

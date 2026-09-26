@@ -72,15 +72,41 @@ interface Bucket {
 
 const seconds = (milliseconds: number): number => Math.max(1, Math.ceil(milliseconds / 1000));
 
+const describeValue = (value: unknown): string =>
+    typeof value === 'string' ? JSON.stringify(value) : String(value);
+
+// Checked at construction, where a bad budget is a line of configuration and the
+// right moment to fail is startup. The limiter refuses only when a comparison
+// against its configuration comes out true, and every comparison with NaN comes
+// out false — so a limit of NaN, which is what `Number(process.env.X)` gives when
+// X is unset, would never refuse anything. That is the limiter switched off with
+// nothing in the log to say so, and it is refused here rather than served.
+const requireNumber = (field: keyof LimiterConfig, value: unknown, minimum: number): number => {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= minimum) {
+        return value;
+    }
+    throw new Error(
+        `RateLimiter ${field} must be a finite number of at least ${minimum}, but was `
+        + `${describeValue(value)}. A budget outside that range does not limit what it says it `
+        + 'limits — a NaN one refuses nothing at all — so the limiter is not built rather than '
+        + 'built wrong. If the value comes from an environment variable, check that it is set '
+        + 'and numeric.'
+    );
+};
+
 export class RateLimiter {
     private readonly config: Required<LimiterConfig>;
     private readonly buckets = new Map<string, Bucket>();
 
     constructor(config: LimiterConfig) {
+        // Defaults through `??`, not a spread: a property that is present but
+        // undefined overwrites a spread default, and `maxKeys: undefined` would
+        // then compare false against every size and remove the bound on the map.
         this.config = {
-            lockoutMs: 0,
-            maxKeys: 10000,
-            ...config
+            limit: requireNumber('limit', config.limit, 1),
+            windowMs: requireNumber('windowMs', config.windowMs, 1),
+            lockoutMs: requireNumber('lockoutMs', config.lockoutMs ?? 0, 0),
+            maxKeys: requireNumber('maxKeys', config.maxKeys ?? 10000, 1)
         };
     }
 
