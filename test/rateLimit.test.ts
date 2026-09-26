@@ -142,7 +142,14 @@ describe('a budget that cannot be applied is refused at startup', () => {
     const build = (config: Record<string, unknown>) => (): RateLimiter =>
         new RateLimiter(config as unknown as LimiterConfig);
 
-    const unusable = [undefined, null, NaN, '10', 0, -1, Infinity];
+    // Beyond the numeric edges: the shapes a value takes on its way in from a
+    // form, a JSON file, or a header-style list. Each is rejected by the typeof
+    // gate, and each would otherwise reach a comparison that coerces it — an
+    // empty string or an empty array coerces to 0, and a one-element array to
+    // its element.
+    const notNumbers = ['', '   ', 'null', [], [10]];
+
+    const unusable = [undefined, null, NaN, '10', ...notNumbers, 0, -1, Infinity];
 
     it('refuses a limit that is absent, not a number, not finite, or below one', () => {
         for (const limit of unusable) {
@@ -159,13 +166,13 @@ describe('a budget that cannot be applied is refused at startup', () => {
     });
 
     it('refuses a lockout that is given but unusable, instead of quietly having none', () => {
-        for (const lockoutMs of [NaN, '900000', -1, Infinity]) {
+        for (const lockoutMs of [NaN, '900000', ...notNumbers, -1, Infinity]) {
             expect(build({limit: 1, windowMs: 60_000, lockoutMs})).toThrow(/RateLimiter lockoutMs /);
         }
     });
 
     it('refuses a key bound that is given but unusable', () => {
-        for (const maxKeys of [NaN, '10', 0, -1, Infinity]) {
+        for (const maxKeys of [NaN, '10', ...notNumbers, 0, -1, Infinity]) {
             expect(build({limit: 1, windowMs: 60_000, maxKeys})).toThrow(/RateLimiter maxKeys /);
         }
     });
@@ -179,6 +186,18 @@ describe('a budget that cannot be applied is refused at startup', () => {
         // The spelling `{maxKeys: process.env.X ? Number(process.env.X) : undefined}`
         // typechecks. It must mean "use the default", not "no bound at all".
         const limiter = new RateLimiter({limit: 5, windowMs: 60_000, maxKeys: undefined});
+
+        for (let i = 0; i < 10_050; i++) {
+            limiter.consume(`address-${i}`, START);
+        }
+
+        expect(limiter.size()).toBeLessThanOrEqual(10_001);
+    });
+
+    it('treats a null maxKeys as the default too, so a JSON config keeps the map bounded', () => {
+        // JSON has no undefined, so a config file that blanks the field writes
+        // null. The default is reached through `??`, which covers both spellings.
+        const limiter = build({limit: 5, windowMs: 60_000, maxKeys: null})();
 
         for (let i = 0; i < 10_050; i++) {
             limiter.consume(`address-${i}`, START);
@@ -232,6 +251,15 @@ describe('the recommended auth limits', () => {
             expect(config).not.toBeInstanceOf(RateLimiter);
             expect(typeof config.limit).toBe('number');
             expect(typeof config.windowMs).toBe('number');
+        }
+    });
+
+    it('passes the limiter\'s startup validation, every one of them', () => {
+        // The limiter throws at construction on a budget it cannot apply. A preset
+        // that tripped that check would crash every site that adopted it at boot,
+        // so each one is built here rather than only the one exercised below.
+        for (const [name, config] of Object.entries(recommendedAuthLimits)) {
+            expect(() => new RateLimiter(config), name).not.toThrow();
         }
     });
 
