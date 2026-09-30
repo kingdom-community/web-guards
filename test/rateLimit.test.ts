@@ -213,6 +213,13 @@ describe('a budget that cannot be applied is refused at startup', () => {
         expect(limiter.consume('a', START + 60_000).allowed).toBe(true);
     });
 
+    it('refuses a null lockoutMs rather than reading it as no lockout', () => {
+        // Unlike maxKeys, whose default still bounds the map, lockoutMs defaults
+        // to "none" — so a JSON config that blanks the field would switch the
+        // lockout off without a word. Only undefined takes the default.
+        expect(build({limit: 1, windowMs: 60_000, lockoutMs: null})).toThrow(/RateLimiter lockoutMs .*but was null\./);
+    });
+
     it('accepts a lockout of zero, which is how a caller spells "none"', () => {
         expect(build({limit: 1, windowMs: 60_000, lockoutMs: 0})).not.toThrow();
     });

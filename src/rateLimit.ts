@@ -102,10 +102,16 @@ export class RateLimiter {
         // Defaults through `??`, not a spread: a property that is present but
         // undefined overwrites a spread default, and `maxKeys: undefined` would
         // then compare false against every size and remove the bound on the map.
+        //
+        // lockoutMs is the exception: only `undefined` takes its default. `??`
+        // would also turn `null` — what a JSON config writes for a blanked field —
+        // into 0, and 0 is "no lockout", so a caller who meant to set one would
+        // get none and hear nothing. A null maxKeys can take its default because
+        // that default still bounds the map; a null lockoutMs is refused instead.
         this.config = {
             limit: requireNumber('limit', config.limit, 1),
             windowMs: requireNumber('windowMs', config.windowMs, 1),
-            lockoutMs: requireNumber('lockoutMs', config.lockoutMs ?? 0, 0),
+            lockoutMs: requireNumber('lockoutMs', config.lockoutMs === undefined ? 0 : config.lockoutMs, 0),
             maxKeys: requireNumber('maxKeys', config.maxKeys ?? 10000, 1)
         };
     }

@@ -277,6 +277,9 @@ construction on a `limit`, `windowMs`, `lockoutMs` or `maxKeys` that is not a
 finite number in range. `Number(undefined)` is `NaN`, every comparison with `NaN`
 is false, and a limiter whose limit is `NaN` would otherwise allow every request
 and never say so. An optional field passed as `undefined` takes its default.
+`null` takes the default for `maxKeys`, whose default still bounds the map, but
+is refused for `lockoutMs`: that default is no lockout at all, and a JSON config
+that blanks the field would otherwise switch the lockout off without a word.
 
 Budgets with no upstream ceiling — posting a thread, replying, moderation
 actions — are a different problem. Nothing behind them limits by address, so the
