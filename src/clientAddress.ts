@@ -27,8 +27,15 @@
 // Node's, and a caller that spells one `X-Real-Ip` must not silently drop
 // through to the socket peer for it.
 //
-// TWO DEPENDENCIES THIS FILE CANNOT CHECK FOR ITSELF
+// THREE DEPENDENCIES THIS FILE CANNOT CHECK FOR ITSELF
 //
+//   * The proxy must OVERWRITE `X-Real-Ip` with the address it saw, or strip
+//     it. That header is read FIRST and taken whole, so a proxy that passes a
+//     client-supplied `X-Real-Ip` through untouched hands every request the
+//     identity its sender chose — the `xff.split(',')[0]` mistake above,
+//     arriving through the other header. Not every proxy sets it: nginx, for
+//     one, forwards the client's copy unless told
+//     `proxy_set_header X-Real-IP $remote_addr;`.
 //   * The proxy must be configured to trust only itself for forwarded headers
 //     (Traefik's `forwardedHeaders.trustedIPs`, nginx's `set_real_ip_from`, and
 //     so on). Without that, the proxy passes a client-supplied
@@ -40,10 +47,10 @@
 //     second-to-last, and with a variable number you want your proxy to
 //     normalise it into `X-Real-Ip` and to read that.
 //
-// Both are settings outside the application, invisible from this package, and
-// they should be verified rather than assumed. A rate limiter keyed on the wrong
-// value is not a weaker limiter; it is a limiter that either does nothing or
-// takes the site down, and it reports neither.
+// All three are settings outside the application, invisible from this package,
+// and they should be verified rather than assumed. A rate limiter keyed on the
+// wrong value is not a weaker limiter; it is a limiter that either does nothing
+// or takes the site down, and it reports neither.
 
 export interface AddressSource {
     headers: Record<string, string | string[] | undefined>;

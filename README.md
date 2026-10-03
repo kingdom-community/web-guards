@@ -334,8 +334,14 @@ request instead. Blank and whitespace-only header values count as absent and fal
 through the same chain, and either header name is matched whatever its
 capitalisation.
 
-Two things it cannot verify for itself, and you must:
+Three things it cannot verify for itself, and you must:
 
+- Your proxy must overwrite `X-Real-Ip` with the address it saw, or strip it.
+  That header is read first and taken whole, so a proxy that passes a
+  client-supplied `X-Real-Ip` through untouched lets every request choose its
+  own identity — the `split(',')[0]` mistake, arriving through the other
+  header. Not every proxy sets it: nginx forwards the client's copy unless told
+  `proxy_set_header X-Real-IP $remote_addr;`.
 - Your proxy must trust only itself for forwarded headers — Traefik's
   `forwardedHeaders.trustedIPs`, nginx's `set_real_ip_from`, and so on. Without
   that, the proxy passes a client-supplied `X-Forwarded-For` through and appends
