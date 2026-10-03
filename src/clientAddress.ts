@@ -47,10 +47,10 @@
 //     second-to-last, and with a variable number you want your proxy to
 //     normalise it into `X-Real-Ip` and to read that.
 //
-// All three are settings outside the application, invisible from this package, and
-// they should be verified rather than assumed. A rate limiter keyed on the wrong
-// value is not a weaker limiter; it is a limiter that either does nothing or
-// takes the site down, and it reports neither.
+// All three are settings outside the application, invisible from this package,
+// and they should be verified rather than assumed. A rate limiter keyed on the
+// wrong value is not a weaker limiter; it is a limiter that either does nothing
+// or takes the site down, and it reports neither.
 
 export interface AddressSource {
     headers: Record<string, string | string[] | undefined>;
