@@ -49,7 +49,7 @@ export interface LimiterConfig {
     // where the point is to stop guessing rather than to smooth traffic.
     lockoutMs?: number;
     // Keys are client addresses and addresses arrive from the internet, so the
-    // map is bounded. Reaching the bound sweeps expired entries and, failing
+    // map is bounded. Exceeding the bound sweeps expired entries and, failing
     // that, clears — which costs an attacker's counter as well as everyone
     // else's, so the bound is generous.
     maxKeys?: number;
