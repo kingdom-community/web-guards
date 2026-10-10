@@ -69,6 +69,16 @@ describe('requestAddress', () => {
     it('tolerates a request with no socket at all', () => {
         expect(requestAddress(request({}))).toBe('unknown');
     });
+
+    it('tolerates a socket whose remote address is null', () => {
+        // `GuardRequest` admits null as well as undefined here. Either way the
+        // request still lands in the shared bucket rather than going unkeyed.
+        expect(requestAddress({headers: {}, socket: {remoteAddress: null}})).toBe('unknown');
+    });
+
+    it('passes the header bag through without lower-casing it first', () => {
+        expect(requestAddress(request({'X-Real-Ip': '203.0.113.7'}, '172.18.0.4'))).toBe('203.0.113.7');
+    });
 });
 
 describe('refuseCrossOriginRequest', () => {
@@ -134,6 +144,123 @@ describe('refuseCrossOriginRequest', () => {
     });
 });
 
+describe('an unusable base URL is our problem, never theirs', () => {
+    // `csrf.ts` folds every base URL with no origin to compare into
+    // `not-configured`. These cases follow each spelling through to the route's
+    // answer: a 503 with a log line, never a 403 that would pass for a wave of
+    // rejected requests, and never a request let through.
+    const unusable: [string, string | undefined][] = [
+        ['unset', undefined],
+        ['empty', ''],
+        ['whitespace-only', '   '],
+        ['unparseable', 'not a url'],
+        ['missing its scheme, so parsed to an opaque origin', 'localhost:3000']
+    ];
+
+    for (const [label, baseUrl] of unusable) {
+        it(`answers 503 and logs once when the base URL is ${label}`, () => {
+            const response = recorder();
+            const log = vi.fn();
+
+            const refused = refuseCrossOriginRequest(
+                request({origin: BASE_URL}),
+                response,
+                {baseUrl, baseUrlSetting: 'PUBLIC_BASE_URL', log}
+            );
+
+            expect(refused).toBe(true);
+            expect(response.recorded.status).toBe(503);
+            expect(response.recorded.body?.error).toBe('not_configured');
+            expect(log).toHaveBeenCalledTimes(1);
+        });
+    }
+
+    it('names a generic setting in the log when the caller gives no name', () => {
+        const log = vi.fn();
+
+        refuseCrossOriginRequest(request({origin: BASE_URL}), recorder(), {baseUrl: undefined, log});
+
+        expect(log.mock.calls[0]?.[0]).toContain('the site base URL');
+    });
+
+    it('logs to console.error when no log callback is given', () => {
+        // The default is loud on purpose. Replacing it is supported; omitting it
+        // must not mean silence.
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        try {
+            refuseCrossOriginRequest(request({origin: BASE_URL}), recorder(), {baseUrl: undefined});
+
+            expect(consoleError).toHaveBeenCalledTimes(1);
+        } finally {
+            consoleError.mockRestore();
+        }
+    });
+
+    it('keeps the setting name out of the body the caller receives', () => {
+        const response = recorder();
+
+        refuseCrossOriginRequest(
+            request({origin: BASE_URL}),
+            response,
+            {baseUrl: undefined, baseUrlSetting: 'PUBLIC_BASE_URL', log: () => undefined}
+        );
+
+        expect(JSON.stringify(response.recorded.body)).not.toContain('PUBLIC_BASE_URL');
+    });
+});
+
+describe('a refused request is not a configuration error', () => {
+    // The log line is reserved for the 503. A 403 that also logged would bury
+    // the one line an operator needs under one per rejected request.
+
+    it('writes no log line for another origin', () => {
+        const log = vi.fn();
+
+        refuseCrossOriginRequest(request({origin: 'https://evil.example'}), recorder(), {baseUrl: BASE_URL, log});
+
+        expect(log).not.toHaveBeenCalled();
+    });
+
+    it('writes no log line for a request carrying neither header', () => {
+        const log = vi.fn();
+
+        refuseCrossOriginRequest(request({}), recorder(), {baseUrl: BASE_URL, log});
+
+        expect(log).not.toHaveBeenCalled();
+    });
+});
+
+describe('which headers the route-level origin check reads', () => {
+    it('falls back to Referer for a same-origin post that carries no Origin', () => {
+        const response = recorder();
+
+        const refused = refuseCrossOriginRequest(
+            request({referer: `${BASE_URL}/login`}),
+            response,
+            {baseUrl: BASE_URL}
+        );
+
+        expect(refused).toBe(false);
+        expect(response.recorded.status).toBeNull();
+    });
+
+    it('refuses with 403 rather than waving through an Origin key it does not read', () => {
+        // `originVerdictFor` reads the lower-cased `origin` and `referer` keys
+        // that Node produces. A header bag spelled `Origin` is therefore read as
+        // carrying no origin at all — which is refused, not allowed.
+        const response = recorder();
+
+        const refused = refuseCrossOriginRequest(
+            request({Origin: BASE_URL}),
+            response,
+            {baseUrl: BASE_URL}
+        );
+
+        expect(refused).toBe(true);
+        expect(response.recorded.status).toBe(403);
+    });
+});
+
 describe('refuseIfLimited', () => {
     it('lets an allowed decision through', () => {
         const response = recorder();
@@ -171,6 +298,18 @@ describe('stringField', () => {
         expect(stringField('a string body', 'username')).toBe('');
         expect(stringField({username: 42}, 'username')).toBe('');
         expect(stringField({}, 'username')).toBe('');
+    });
+
+    it('answers an empty string for an array body', () => {
+        expect(stringField(['alice'], 'username')).toBe('');
+    });
+
+    it('answers an empty string for a property inherited from Object.prototype', () => {
+        // `toString` and `constructor` are present on every object. They are
+        // functions, not strings, so they come back empty rather than forwarded.
+        expect(stringField({}, 'toString')).toBe('');
+        expect(stringField({}, 'constructor')).toBe('');
+        expect(stringField({}, '__proto__')).toBe('');
     });
 
     it('truncates rather than forwarding an unbounded string upstream', () => {
