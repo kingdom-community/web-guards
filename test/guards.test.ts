@@ -196,7 +196,7 @@ describe('an unusable base URL is our problem, never theirs', () => {
         }
     });
 
-    it('tells the operator the setting name and tells the caller nothing about it', () => {
+    it('keeps the setting name out of the body the caller receives', () => {
         const response = recorder();
 
         refuseCrossOriginRequest(
