@@ -2,6 +2,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
     methodNotAllowed,
+    originVerdictFor,
     refuseCrossOriginRequest,
     refuseIfLimited,
     requestAddress,
@@ -244,10 +245,11 @@ describe('which headers the route-level origin check reads', () => {
         expect(response.recorded.status).toBeNull();
     });
 
-    it('refuses with 403 rather than waving through an Origin key it does not read', () => {
-        // `originVerdictFor` reads the lower-cased `origin` and `referer` keys
-        // that Node produces. A header bag spelled `Origin` is therefore read as
-        // carrying no origin at all — which is refused, not allowed.
+    // `GuardRequest['headers']` is a structural record, not Node's
+    // `IncomingHttpHeaders`, so a caller can hand over `Origin` or `Referer` as
+    // spelled on the wire. Reading those as absent would refuse every post with
+    // a 403 that blames the caller for an integration mismatch.
+    it('reads an Origin key spelled with a capital letter', () => {
         const response = recorder();
 
         const refused = refuseCrossOriginRequest(
@@ -256,8 +258,29 @@ describe('which headers the route-level origin check reads', () => {
             {baseUrl: BASE_URL}
         );
 
-        expect(refused).toBe(true);
-        expect(response.recorded.status).toBe(403);
+        expect(refused).toBe(false);
+        expect(response.recorded.status).toBeNull();
+    });
+
+    it('reads a Referer key spelled with a capital letter', () => {
+        expect(originVerdictFor(request({Referer: `${BASE_URL}/login`}), BASE_URL)).toEqual({ok: true});
+    });
+
+    it('still refuses another origin whatever the key is spelled', () => {
+        // Matching the key is not matching the value: a found Origin goes
+        // through the same comparison as a lower-cased one.
+        expect(originVerdictFor(request({ORIGIN: 'https://evil.example'}), BASE_URL))
+            .toEqual({ok: false, reason: 'mismatched-origin'});
+    });
+
+    it('still refuses a capitalised but empty Origin as carrying no origin', () => {
+        expect(originVerdictFor(request({Origin: '', Referer: '   '}), BASE_URL))
+            .toEqual({ok: false, reason: 'missing-origin'});
+    });
+
+    it('prefers the exact lower-case spelling, which is the one Node produces', () => {
+        expect(originVerdictFor(request({origin: 'https://evil.example', Origin: BASE_URL}), BASE_URL))
+            .toEqual({ok: false, reason: 'mismatched-origin'});
     });
 });
 
