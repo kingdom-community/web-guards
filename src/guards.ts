@@ -63,13 +63,37 @@ export interface OriginGuardOptions {
     log?: (message: string) => void;
 }
 
+// `name` is given already lower-cased. The same lookup `clientAddress.ts` uses,
+// for the same reason: Node lower-cases incoming header names, so the direct
+// read answers every request that arrived through it, but `GuardRequest` is a
+// structural record and `Origin` is a spelling this module can be handed. Not
+// finding it would read as a request carrying no origin, and the 403 that
+// follows would blame the caller for what is really an integration mismatch.
+// Finding it relaxes nothing — the value still goes through
+// `checkRequestOrigin` unchanged.
+const rawHeaderValue = (
+    headers: GuardRequest['headers'],
+    name: string
+): string | string[] | undefined => {
+    if (name in headers) {
+        return headers[name];
+    }
+    for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === name) {
+            return headers[key];
+        }
+    }
+    return undefined;
+};
+
+// Origin and Referer are matched WITHOUT REGARD TO CASE; see `rawHeaderValue`.
 export const originVerdictFor = (
     request: GuardRequest,
     baseUrl: string | undefined
 ): OriginVerdict =>
     checkRequestOrigin({
-        origin: request.headers.origin,
-        referer: request.headers.referer,
+        origin: rawHeaderValue(request.headers, 'origin'),
+        referer: rawHeaderValue(request.headers, 'referer'),
         baseUrl
     });
 
