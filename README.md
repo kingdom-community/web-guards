@@ -77,7 +77,8 @@ export default async function login(request: NextApiRequest, response: NextApiRe
         return;
     }
 
-    // 2. Rate limits, keyed on the address the proxy saw — never the socket.
+    // 2. Rate limits, keyed on the address the proxy saw. The socket peer is
+    //    only the fallback for a request with no usable forwarded header.
     const address = requestAddress(request);
     if (refuseIfLimited(response, failures.check(address), 'Too many failed sign-in attempts.')) {
         return;

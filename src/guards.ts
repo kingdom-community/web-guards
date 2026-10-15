@@ -43,8 +43,9 @@ export const methodNotAllowed = (response: GuardResponse, allowed: string[]): vo
 };
 
 // The address a per-address budget is keyed on. Read from the proxy's forwarded
-// header, never from the socket — see `clientAddress.ts`, which is where the
-// reasoning and the failure mode live.
+// headers first; the socket peer is consulted only when neither header carries
+// a usable value, and behind a proxy that peer is the proxy. See
+// `clientAddress.ts`, which is where the reasoning and the failure mode live.
 export const requestAddress = (request: GuardRequest): string =>
     clientAddress({headers: request.headers, socketAddress: request.socket?.remoteAddress ?? null});
 
