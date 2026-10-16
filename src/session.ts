@@ -32,7 +32,9 @@
 //
 // NO COOKIE ISSUED BY THIS MODULE IS EVER DOMAIN-SCOPED, and the constructor
 // refuses a cookie name without the prefix rather than letting the guarantee
-// quietly become a convention.
+// quietly become a convention. The one way past that refusal is the explicit
+// `allowCookieNamesWithoutHostPrefix` option below, named so that review can
+// find it; it waives the prefix and nothing else.
 //
 // THE NAME AND THE VALUE ARE BOTH CHECKED, BECAUSE A `;` ENDS EITHER ONE.
 //
