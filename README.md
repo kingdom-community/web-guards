@@ -213,6 +213,12 @@ same reason — so the guarantee cannot quietly decay back into a convention. Th
 `www` case belongs in a redirect to the canonical host, which is where it is
 actually solvable.
 
+There is one opt-out, `allowCookieNamesWithoutHostPrefix: true`, and it is named
+so that it can be searched for and refused in review. Its only legitimate use is
+a deployment that cannot serve over HTTPS or another trustworthy origin, where
+the browser would reject a `__Host-` cookie anyway. It waives the prefix and
+nothing else: the name and value checks below still apply.
+
 That guarantee also has to survive the values passed *through* it. A `Set-Cookie`
 header is a value followed by `;`-separated attributes, so a `;` inside a token
 does not corrupt the cookie — it *ends* it and starts an attribute. A token of
