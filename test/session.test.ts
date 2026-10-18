@@ -187,9 +187,9 @@ describe('a lifetime that cannot be written as Max-Age is refused, not dropped',
 
     it('REFUSES every value that would not be read as a Max-Age, or would delete the cookie', () => {
         // Zero and negatives are a cookie deleted on arrival; a fraction, an
-        // infinity or a string is a Max-Age the browser ignores.
+        // infinity, a string or an array is a Max-Age the browser ignores.
         for (const option of LIFETIMES) {
-            for (const value of [0, -1, 1.5, Infinity, '3600', '']) {
+            for (const value of [0, -1, 1.5, Infinity, '3600', '', ' ', [], [3600]]) {
                 expect(() => createSessionCookieRules(withLifetime(option, value)))
                     .toThrow(option);
             }
