@@ -195,13 +195,49 @@ export interface MaxAgeOptions {
     minMaxAgeSeconds?: number;
 }
 
+type LifetimeOption = keyof Pick<
+    SessionCookieOptions,
+    'refreshMaxAgeSeconds' | 'fallbackMaxAgeSeconds' | 'minMaxAgeSeconds'
+>;
+
+const describeValue = (value: unknown): string =>
+    typeof value === 'string' ? JSON.stringify(value) : String(value);
+
+// A lifetime is interpolated straight into `Max-Age=`, and RFC 6265 §5.2.2 says
+// a browser IGNORES a Max-Age that is not a run of digits. So `Max-Age=NaN` —
+// what `Number(process.env.X)` gives when X is unset — or `Max-Age=undefined` or
+// `Max-Age=1.5` does not fail: the browser drops the attribute and keeps the
+// cookie as a session cookie with no expiry of its own, the configured bound
+// gone and nothing to say so. A whole number of at least one second is required,
+// and anything else THROWS with the option named. Zero is refused as well: a
+// cookie written with `Max-Age=0` is deleted on arrival, which presents as
+// "login does nothing".
+const requireSeconds = (option: LifetimeOption, value: unknown): number => {
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 1) {
+        return value;
+    }
+    throw new Error(
+        `Session cookie option ${option} must be a whole number of seconds, at least 1, but was `
+        + `${describeValue(value)}. A browser ignores a Max-Age it cannot read and keeps the `
+        + 'cookie with no expiry at all, so the cookie is not written rather than written '
+        + 'unbounded. If the value comes from an environment variable, check that it is set '
+        + 'and numeric.'
+    );
+};
+
+// Defaults through `??`, not a spread: a property that is present but undefined
+// overwrites a spread default. `null` takes the default too, because every
+// default here is a bounded lifetime.
 export const maxAgeFor = (
     expiresAt: string | null | undefined,
     now: number = Date.now(),
     options: MaxAgeOptions = {}
 ): number => {
-    const fallback = options.fallbackMaxAgeSeconds ?? DEFAULTS.fallbackMaxAgeSeconds;
-    const floor = options.minMaxAgeSeconds ?? DEFAULTS.minMaxAgeSeconds;
+    const fallback = requireSeconds(
+        'fallbackMaxAgeSeconds',
+        options.fallbackMaxAgeSeconds ?? DEFAULTS.fallbackMaxAgeSeconds
+    );
+    const floor = requireSeconds('minMaxAgeSeconds', options.minMaxAgeSeconds ?? DEFAULTS.minMaxAgeSeconds);
     if (!expiresAt) {
         return fallback;
     }
@@ -285,7 +321,27 @@ const assertHostPrefixed = (name: string, allowed: boolean): void => {
 };
 
 export const createSessionCookieRules = (options: SessionCookieOptions = {}): SessionCookieRules => {
-    const settings = {...DEFAULTS, ...options};
+    // Through `??` rather than a spread, for the reason given above `maxAgeFor`.
+    // The lifetimes are checked here, at construction, so a bad one is a startup
+    // failure rather than a 500 on the first login.
+    const settings = {
+        sessionCookieName: options.sessionCookieName ?? DEFAULTS.sessionCookieName,
+        refreshCookieName: options.refreshCookieName ?? DEFAULTS.refreshCookieName,
+        refreshMaxAgeSeconds: requireSeconds(
+            'refreshMaxAgeSeconds',
+            options.refreshMaxAgeSeconds ?? DEFAULTS.refreshMaxAgeSeconds
+        ),
+        fallbackMaxAgeSeconds: requireSeconds(
+            'fallbackMaxAgeSeconds',
+            options.fallbackMaxAgeSeconds ?? DEFAULTS.fallbackMaxAgeSeconds
+        ),
+        minMaxAgeSeconds: requireSeconds(
+            'minMaxAgeSeconds',
+            options.minMaxAgeSeconds ?? DEFAULTS.minMaxAgeSeconds
+        ),
+        allowCookieNamesWithoutHostPrefix:
+            options.allowCookieNamesWithoutHostPrefix ?? DEFAULTS.allowCookieNamesWithoutHostPrefix
+    };
     // Grammar first, prefix second. The escape hatch below waives the prefix and
     // nothing else — there is no option that waives the grammar, because a name
     // carrying a `;` is not a name a browser would have accepted either.

@@ -4,7 +4,8 @@ import {
     createSessionCookieRules,
     HOST_COOKIE_PREFIX,
     maxAgeFor,
-    readCookie
+    readCookie,
+    type SessionCookieOptions
 } from '../src/session.js';
 
 // The cookie rules.
@@ -136,6 +137,82 @@ describe('the session cookies', () => {
     it('omit the refresh cookie when the upstream issued no refresh token', () => {
         expect(rules.issued({token: 'jwt', expiresAt: null, refreshToken: null}, NOW)).toHaveLength(1);
         expect(rules.issued({token: 'jwt'}, NOW)).toHaveLength(1);
+    });
+});
+
+// A browser ignores a Max-Age that is not a run of digits and keeps the cookie
+// with no expiry of its own. So a lifetime of NaN — what an unset environment
+// variable becomes after `Number()` — must stop the rules being built, rather
+// than quietly writing `Max-Age=NaN` and removing the bound it was meant to set.
+describe('a lifetime that cannot be written as Max-Age is refused, not dropped', () => {
+    const LIFETIMES = ['refreshMaxAgeSeconds', 'fallbackMaxAgeSeconds', 'minMaxAgeSeconds'] as const;
+    const withLifetime = (option: string, value: unknown): SessionCookieOptions =>
+        ({[option]: value}) as unknown as SessionCookieOptions;
+
+    it('takes the defaults when an option is present but undefined', () => {
+        // The case a spread gets wrong: a present-but-undefined property
+        // overwrites the default it was spread over.
+        const blank = createSessionCookieRules({
+            sessionCookieName: undefined,
+            refreshCookieName: undefined,
+            refreshMaxAgeSeconds: undefined,
+            fallbackMaxAgeSeconds: undefined,
+            minMaxAgeSeconds: undefined
+        });
+
+        const [session, refresh] = blank.issued({token: 'jwt', refreshToken: 'r'}, NOW);
+        expect(session).toBe('__Host-session=jwt; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600');
+        expect(refresh).toBe('__Host-refresh=r; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000');
+        expect(blank.maxAgeFor('2020-01-01T00:00:00Z', NOW)).toBe(60);
+    });
+
+    it('takes the defaults for null, which is what a JSON config writes for a blanked field', () => {
+        const blank = createSessionCookieRules({
+            refreshMaxAgeSeconds: null as unknown as number,
+            fallbackMaxAgeSeconds: null as unknown as number,
+            minMaxAgeSeconds: null as unknown as number
+        });
+
+        expect(blank.issued({token: 'jwt', refreshToken: 'r'}, NOW)[1]).toContain('Max-Age=2592000');
+        expect(blank.maxAgeFor(null, NOW)).toBe(3600);
+        expect(blank.maxAgeFor('2020-01-01T00:00:00Z', NOW)).toBe(60);
+    });
+
+    it('REFUSES NaN, an unset environment variable read through Number(), naming the option', () => {
+        for (const option of LIFETIMES) {
+            expect(() => createSessionCookieRules(withLifetime(option, Number(undefined))))
+                .toThrow(new RegExp(`${option} must be a whole number of seconds.*but was NaN`));
+        }
+    });
+
+    it('REFUSES every value that would not be read as a Max-Age, or would delete the cookie', () => {
+        // Zero and negatives are a cookie deleted on arrival; a fraction, an
+        // infinity or a string is a Max-Age the browser ignores.
+        for (const option of LIFETIMES) {
+            for (const value of [0, -1, 1.5, Infinity, '3600', '']) {
+                expect(() => createSessionCookieRules(withLifetime(option, value)))
+                    .toThrow(option);
+            }
+        }
+    });
+
+    it('refuses the same values when maxAgeFor is called on its own', () => {
+        expect(() => maxAgeFor(null, NOW, {fallbackMaxAgeSeconds: Number.NaN}))
+            .toThrow(/fallbackMaxAgeSeconds/);
+        expect(() => maxAgeFor('2026-08-30T13:00:00Z', NOW, {minMaxAgeSeconds: Number.NaN}))
+            .toThrow(/minMaxAgeSeconds/);
+        expect(maxAgeFor(null, NOW, {fallbackMaxAgeSeconds: undefined})).toBe(3600);
+    });
+
+    it('still accepts a lifetime of one second', () => {
+        const short = createSessionCookieRules({
+            refreshMaxAgeSeconds: 1,
+            fallbackMaxAgeSeconds: 1,
+            minMaxAgeSeconds: 1
+        });
+
+        expect(short.issued({token: 'jwt', refreshToken: 'r'}, NOW)[1]).toContain('Max-Age=1');
+        expect(short.maxAgeFor(null, NOW)).toBe(1);
     });
 });
 
