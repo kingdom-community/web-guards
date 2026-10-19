@@ -16,12 +16,16 @@ const SECRET = 'a-secret-nobody-else-has-0123456789';
 // genuine in every respect a signature can attest to. It stands in for the
 // states that were already sitting in browsers when the rule arrived, and for
 // any copy of this module that has not adopted it.
-const stateSignedFor = (subject: string, expiresAt: number): string => {
+const stateSignedFor = (subject: string, expiresAt: number): string =>
+    signedPayload(JSON.stringify({n: 'a-nonce', u: subject, e: expiresAt}));
+
+// Any payload text at all, encoded and signed exactly as this module signs its
+// own. It is what gets past the signature check, so it is how the checks AFTER
+// the signature are reached.
+const signedPayload = (payload: string): string => {
     const base64url = (value: string): string =>
         value.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    const encoded = base64url(
-        Buffer.from(JSON.stringify({n: 'a-nonce', u: subject, e: expiresAt}), 'utf8').toString('base64')
-    );
+    const encoded = base64url(Buffer.from(payload, 'utf8').toString('base64'));
     return `${encoded}.${base64url(createHmac('sha256', SECRET).update(encoded).digest('base64'))}`;
 };
 
@@ -210,5 +214,94 @@ describe('verifying a state', () => {
         const foreign = issueState('mallory', 'some-other-secret') as string;
 
         expect(verifyState(foreign, '', SECRET)).toEqual({ok: false, reason: 'unbound'});
+    });
+
+    it('rejects everything when the secret is whitespace-only, as issuing does', () => {
+        // The same test `issueState` applies. A secret of spaces is an unset
+        // secret that a template or a quoted blank left behind, not a key.
+        const state = issueState('alice', SECRET) as string;
+
+        expect(verifyState(state, 'alice', '   ')).toEqual({ok: false, reason: 'not-configured'});
+        expect(verifyState(state, 'alice', '\t\n')).toEqual({ok: false, reason: 'not-configured'});
+    });
+});
+
+// The `state` query value is attacker-controlled in every respect, including
+// whether it is there at all and how many times it appears. Each shape below is
+// one a callback can actually be sent, and each has to come back as a refusal
+// that names itself rather than as a pass or a crash.
+describe('a state parameter that is not a state', () => {
+    it('rejects a whitespace-only state rather than reading it as present', () => {
+        expect(verifyState('   ', 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyState('\t\n', 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it("rejects the literal string 'null' that a serialised missing value becomes", () => {
+        expect(verifyState('null', 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyState('undefined', 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('rejects a parameter that arrived as an empty list', () => {
+        // `?state` parsed by some query-string libraries, or a framework that
+        // always hands back arrays. There is no first value to take.
+        expect(verifyState([], 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('rejects a repeated parameter whose first value is empty, whatever follows it', () => {
+        // The first value is the one taken, so a genuine state in second place
+        // does not rescue an empty one in first.
+        const state = issueState('alice', SECRET) as string;
+
+        expect(verifyState(['', state], 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyState(['   ', state], 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('rejects a state with no payload in front of the separator', () => {
+        expect(verifyState('.signature', 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('does not accept a genuine state with whitespace around it', () => {
+        // Nothing here trims. Padding changes the signed text, so the signature
+        // no longer matches — refused, and refused as tampering.
+        const state = issueState('alice', SECRET) as string;
+
+        expect(verifyState(` ${state}`, 'alice', SECRET)).toEqual({ok: false, reason: 'bad-signature'});
+        expect(verifyState(`${state} `, 'alice', SECRET)).toEqual({ok: false, reason: 'bad-signature'});
+    });
+});
+
+// Past the signature check the payload is known to have been signed with this
+// secret, but it is still parsed and type-checked rather than trusted, so that a
+// payload of the wrong shape is a refusal and not an `ok: true` with whatever
+// happens to be in `u`. These payloads carry a genuine signature; only their
+// contents are wrong.
+describe('a correctly signed payload of the wrong shape', () => {
+    // Verified at a moment well before every expiry used below, so a refusal
+    // here can only be about shape.
+    const verifyPayload = (payload: unknown): unknown =>
+        verifyState(signedPayload(JSON.stringify(payload)), 'alice', SECRET, 1_000_000);
+
+    it('rejects a payload that is not JSON', () => {
+        expect(verifyState(signedPayload('not json'), 'alice', SECRET, 1_000_000))
+            .toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('rejects a payload with no subject or no expiry', () => {
+        expect(verifyPayload({n: 'x', e: 2_000_000})).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyPayload({n: 'x', u: 'alice'})).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('rejects a subject that is not a string, even one that would compare equal', () => {
+        // `u: ['alice']` stringifies to 'alice'. A loose comparison would bind
+        // it; the type check refuses it before any comparison happens.
+        expect(verifyPayload({n: 'x', u: ['alice'], e: 2_000_000})).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyPayload({n: 'x', u: null, e: 2_000_000})).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('rejects an expiry that is not a number, rather than reading it as never expiring', () => {
+        // A string expiry compared with `<=` would be coerced; `null` is what
+        // JSON makes of a NaN or an Infinity. Neither is read as a deadline.
+        expect(verifyPayload({n: 'x', u: 'alice', e: '2000000'})).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyPayload({n: 'x', u: 'alice', e: null})).toEqual({ok: false, reason: 'malformed'});
     });
 });
