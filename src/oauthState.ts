@@ -194,13 +194,16 @@ export const verifyState = (
         return {ok: false, reason: 'bad-signature'};
     }
 
-    let payload: {n?: unknown; u?: unknown; e?: unknown};
+    let payload: {n?: unknown; u?: unknown; e?: unknown} | null;
     try {
-        payload = JSON.parse(decode(encoded)) as {n?: unknown; u?: unknown; e?: unknown};
+        payload = JSON.parse(decode(encoded)) as {n?: unknown; u?: unknown; e?: unknown} | null;
     } catch {
         return {ok: false, reason: 'malformed'};
     }
-    if (typeof payload.u !== 'string' || typeof payload.e !== 'number') {
+    // `null` parses, and is the one JSON value that throws on a property read
+    // rather than reading `u` as undefined — so it is checked by name, or it
+    // would be a crash instead of a refusal after all.
+    if (payload === null || typeof payload.u !== 'string' || typeof payload.e !== 'number') {
         return {ok: false, reason: 'malformed'};
     }
     // Not `malformed`: this is a payload this module used to write, so a state
