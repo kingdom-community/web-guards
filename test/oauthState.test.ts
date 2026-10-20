@@ -286,6 +286,18 @@ describe('a correctly signed payload of the wrong shape', () => {
             .toEqual({ok: false, reason: 'malformed'});
     });
 
+    it('rejects a payload that is JSON but not an object, rather than throwing on it', () => {
+        // `null` is the case that matters: reading `u` from it throws, which
+        // would turn a refusal into a 500 out of the callback route. The other
+        // non-object values read `u` as undefined and are here so the row is
+        // complete.
+        expect(verifyPayload(null)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyPayload(5)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyPayload(true)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyPayload('alice')).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyPayload([])).toEqual({ok: false, reason: 'malformed'});
+    });
+
     it('rejects a payload with no subject or no expiry', () => {
         expect(verifyPayload({n: 'x', e: 2_000_000})).toEqual({ok: false, reason: 'malformed'});
         expect(verifyPayload({n: 'x', u: 'alice'})).toEqual({ok: false, reason: 'malformed'});
