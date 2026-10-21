@@ -311,6 +311,16 @@ limiter somebody will trust for something it cannot do:
 - **It is a fixed window, not a sliding one.** An attacker who understands the
   window can spend a full budget at the end of one and another at the start of
   the next. The lockout mode is the answer where that matters.
+- **The map is bounded, and overflowing it forgets everyone.** Keys are client
+  addresses, so the number of counters is capped by `maxKeys` (10,000 unless
+  you set it). When a new key takes the map past the cap, expired entries are
+  swept first; if that does not bring it back under, every counter is cleared —
+  live lockouts included. A caller who can present more distinct addresses
+  than `maxKeys` inside one window can therefore reset every budget on that
+  limiter, their own lockout with the rest. The alternative is an unbounded map
+  that an address-rich caller grows until the process runs out of memory, which
+  is worse. Raise `maxKeys` if your traffic needs more headroom than the
+  default.
 
 If any of those is disqualifying for your site, you want a limiter backed by
 Redis. This one is for the case where you have one small container and would
