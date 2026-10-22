@@ -386,3 +386,63 @@ describe('reading a cookie back', () => {
         expect(readCookie('malformed', 'anything')).toBeNull();
     });
 });
+
+// The rest of the row for the one value this module reads off a request. A
+// session token that comes back as something other than null or the exact value
+// written is either a signed-out user who was told they signed in or a request
+// running as somebody it is not, so every shape the header can arrive in is
+// pinned here.
+describe('a Cookie header that carries no usable session', () => {
+    it('answers null for a null header, which is what an absent one reads as', () => {
+        expect(rules.sessionTokenFrom(null)).toBeNull();
+    });
+
+    it('answers null for an empty and a whitespace-only header', () => {
+        expect(rules.sessionTokenFrom('')).toBeNull();
+        expect(rules.sessionTokenFrom('   ')).toBeNull();
+    });
+
+    it('answers null for a whitespace-only value rather than a token of spaces', () => {
+        expect(rules.sessionTokenFrom(`${rules.sessionCookieName}=   `)).toBeNull();
+    });
+
+    it('does not read a name that differs only in case as the session', () => {
+        // The prefix is what stops a sibling subdomain from setting this cookie,
+        // and a browser that compared it case-sensitively would let a
+        // `Domain`-scoped `__HOST-session` through. Matching the name exactly
+        // means such a cookie is never mistaken for ours.
+        expect(rules.sessionTokenFrom('__HOST-session=forged')).toBeNull();
+        expect(rules.sessionTokenFrom('__host-session=forged')).toBeNull();
+    });
+
+    it('lets an empty first copy shadow a later one, leaving the request signed out', () => {
+        // The first cookie of the name decides. An empty one answers null rather
+        // than falling through to a later copy, which fails toward "no session".
+        expect(rules.sessionTokenFrom(`${rules.sessionCookieName}=; ${rules.sessionCookieName}=later`))
+            .toBeNull();
+    });
+});
+
+describe('a Cookie header the session is read out of whole', () => {
+    it('keeps every = after the first, because base64 padding is legal in a value', () => {
+        expect(rules.sessionTokenFrom(`${rules.sessionCookieName}=abc==`)).toBe('abc==');
+    });
+
+    it('trims the whitespace a client may put around the name and the value', () => {
+        expect(rules.sessionTokenFrom(`theme=dark;   ${rules.sessionCookieName}  =  jwt-value  `))
+            .toBe('jwt-value');
+    });
+
+    it('skips a malformed part and still finds the session after it', () => {
+        expect(rules.sessionTokenFrom(`malformed; ${rules.sessionCookieName}=jwt-value`)).toBe('jwt-value');
+    });
+
+    it('answers the first copy when the name appears twice', () => {
+        // A browser sends a same-named pair longest path first, then oldest
+        // first. A `__Host-` cookie can only ever have `Path=/` and can only be
+        // set by this host, so in the default configuration both copies came
+        // from here and neither was planted.
+        expect(rules.sessionTokenFrom(`${rules.sessionCookieName}=first; ${rules.sessionCookieName}=second`))
+            .toBe('first');
+    });
+});
