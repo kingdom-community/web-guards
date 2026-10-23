@@ -88,6 +88,63 @@ describe('clientAddress', () => {
     });
 });
 
+// Every source this module reads can be present and still carry nothing: a key
+// with no value, a value of whitespace, a repeated header whose last copy is
+// blank, a socket address the runtime could not fill in. Each has to land on
+// the next source down, and the bottom of the list has to be the shared bucket
+// rather than an empty key.
+//
+// The case that matters most is the repeated header. Its earlier copies are the
+// ones the client could have written, so a blank last copy must fall through to
+// the next source — never reach back for the element before it.
+describe('a source that is present but carries nothing', () => {
+    it('falls through an X-Real-Ip key that has no value', () => {
+        expect(clientAddress({
+            headers: {'x-real-ip': undefined, 'x-forwarded-for': '198.51.100.9, 203.0.113.7'},
+            socketAddress: '172.18.0.4'
+        })).toBe('203.0.113.7');
+    });
+
+    it('does not reach back past a blank last copy of a repeated X-Real-Ip', () => {
+        expect(clientAddress({
+            headers: {'x-real-ip': ['1.2.3.4', '  '], 'x-forwarded-for': '198.51.100.9, 203.0.113.7'},
+            socketAddress: '172.18.0.4'
+        })).toBe('203.0.113.7');
+    });
+
+    it('does not reach back past a blank last copy of a repeated X-Forwarded-For', () => {
+        // `1.2.3.4` is in the first copy, which is the one a client can send.
+        expect(clientAddress({
+            headers: {'x-forwarded-for': ['1.2.3.4', '']},
+            socketAddress: '172.18.0.4'
+        })).toBe('172.18.0.4');
+    });
+
+    it('keys a whitespace-only or null socket address on the shared bucket', () => {
+        // An empty string is never a key: it would bucket these requests
+        // together under a name that looks like an address but names nothing.
+        expect(clientAddress({headers: {}, socketAddress: '   '})).toBe(UNKNOWN_CLIENT_ADDRESS);
+        expect(clientAddress({headers: {}, socketAddress: null})).toBe(UNKNOWN_CLIENT_ADDRESS);
+    });
+});
+
+// Padding is not part of an address. A proxy, or a hand-written header bag, that
+// pads the value must not split one visitor into two buckets, one per spelling.
+describe('one visitor, one bucket, however the value is padded', () => {
+    it('trims X-Real-Ip', () => {
+        expect(clientAddress({headers: {'x-real-ip': ' 203.0.113.7 '}})).toBe('203.0.113.7');
+    });
+
+    it('trims the last X-Forwarded-For entry', () => {
+        expect(clientAddress({headers: {'x-forwarded-for': '198.51.100.9 ,  203.0.113.7  '}}))
+            .toBe('203.0.113.7');
+    });
+
+    it('trims the socket address', () => {
+        expect(clientAddress({headers: {}, socketAddress: ' 172.18.0.4 '})).toBe('172.18.0.4');
+    });
+});
+
 // The header bag this module takes is a structural record, not Node's
 // `IncomingHttpHeaders`. Node lower-cases what it hands up; a caller that does
 // not — another framework, an edge runtime, a hand-built test double — spells
