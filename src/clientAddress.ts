@@ -71,15 +71,21 @@ export const UNKNOWN_CLIENT_ADDRESS = 'unknown';
 // fall through to the socket peer below, which behind a proxy is the proxy, and
 // that is the whole-site outage described at the top of this file arriving
 // silently.
+//
+// A key that is PRESENT BUT `undefined` does not end the search, in either
+// lookup. A merged header bag — `{'x-real-ip': undefined, ...wireHeaders}` —
+// can carry an empty lower-case key alongside the wire's `X-Real-Ip`; stopping
+// at the empty one would drop through to the socket peer exactly as above.
 const rawHeaderValue = (
     headers: AddressSource['headers'],
     name: string
 ): string | string[] | undefined => {
-    if (name in headers) {
-        return headers[name];
+    const direct = headers[name];
+    if (direct !== undefined) {
+        return direct;
     }
     for (const key of Object.keys(headers)) {
-        if (key.toLowerCase() === name) {
+        if (key.toLowerCase() === name && headers[key] !== undefined) {
             return headers[key];
         }
     }
