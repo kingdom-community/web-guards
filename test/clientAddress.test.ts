@@ -188,4 +188,27 @@ describe('a header name spelled the way the wire spelled it', () => {
             headers: {'x-real-ip': '203.0.113.7', 'X-Real-Ip': '1.2.3.4'}
         })).toBe('203.0.113.7');
     });
+
+    it('does not let a lower-case key with no value hide the capitalised one', () => {
+        // A merged bag — defaults spread under the wire's headers — can carry
+        // the key with nothing in it. Stopping there would hand back the socket
+        // peer, which behind a proxy is the proxy: one bucket for every visitor.
+        expect(clientAddress({
+            headers: {'x-real-ip': undefined, 'X-Real-Ip': '203.0.113.7'},
+            socketAddress: '172.18.0.4'
+        })).toBe('203.0.113.7');
+        expect(clientAddress({
+            headers: {'x-forwarded-for': undefined, 'X-Forwarded-For': '1.2.3.4, 203.0.113.7'},
+            socketAddress: '172.18.0.4'
+        })).toBe('203.0.113.7');
+    });
+
+    it('does not let one capitalised key with no value hide another', () => {
+        // The scan skips an empty key for the same reason the direct lookup
+        // does; otherwise key order alone would decide whether the header is seen.
+        expect(clientAddress({
+            headers: {'X-Real-Ip': undefined, 'X-REAL-IP': '203.0.113.7'},
+            socketAddress: '172.18.0.4'
+        })).toBe('203.0.113.7');
+    });
 });
