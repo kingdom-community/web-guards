@@ -282,6 +282,38 @@ describe('which headers the route-level origin check reads', () => {
         expect(originVerdictFor(request({origin: 'https://evil.example', Origin: BASE_URL}), BASE_URL))
             .toEqual({ok: false, reason: 'mismatched-origin'});
     });
+
+    it('does not let a lower-case key with no value hide the capitalised one', () => {
+        // A merged bag — defaults spread under the wire's headers — can carry
+        // the key with nothing in it. Stopping there would answer a same-origin
+        // post with a 403 that blames the caller for the bag's shape.
+        const response = recorder();
+
+        const refused = refuseCrossOriginRequest(
+            request({origin: undefined, Origin: BASE_URL}),
+            response,
+            {baseUrl: BASE_URL}
+        );
+
+        expect(refused).toBe(false);
+        expect(response.recorded.status).toBeNull();
+        expect(originVerdictFor(request({referer: undefined, Referer: `${BASE_URL}/login`}), BASE_URL))
+            .toEqual({ok: true});
+    });
+
+    it('does not let one capitalised key with no value hide another', () => {
+        // The scan skips an empty key for the same reason the direct lookup
+        // does; otherwise key order alone would decide whether the header is seen.
+        expect(originVerdictFor(request({Origin: undefined, ORIGIN: BASE_URL}), BASE_URL))
+            .toEqual({ok: true});
+    });
+
+    it('still refuses another origin found behind a key with no value', () => {
+        // Finding the value is not accepting it. This is `mismatched-origin`,
+        // not the `missing-origin` the empty key used to produce.
+        expect(originVerdictFor(request({origin: undefined, Origin: 'https://evil.example'}), BASE_URL))
+            .toEqual({ok: false, reason: 'mismatched-origin'});
+    });
 });
 
 describe('refuseIfLimited', () => {
