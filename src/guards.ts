@@ -72,15 +72,21 @@ export interface OriginGuardOptions {
 // follows would blame the caller for what is really an integration mismatch.
 // Finding it relaxes nothing — the value still goes through
 // `checkRequestOrigin` unchanged.
+//
+// A key that is PRESENT BUT `undefined` does not end the search, in either
+// lookup. A merged header bag — `{origin: undefined, ...wireHeaders}` — can
+// carry an empty lower-case key alongside the wire's `Origin`; stopping at the
+// empty one would be the same caller-blaming 403 as not finding it at all.
 const rawHeaderValue = (
     headers: GuardRequest['headers'],
     name: string
 ): string | string[] | undefined => {
-    if (name in headers) {
-        return headers[name];
+    const direct = headers[name];
+    if (direct !== undefined) {
+        return direct;
     }
     for (const key of Object.keys(headers)) {
-        if (key.toLowerCase() === name) {
+        if (key.toLowerCase() === name && headers[key] !== undefined) {
             return headers[key];
         }
     }
