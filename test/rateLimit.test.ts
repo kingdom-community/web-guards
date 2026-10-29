@@ -270,15 +270,41 @@ describe('the recommended auth limits', () => {
         }
     });
 
+    it('matches the preset table in the README, number for number', () => {
+        // The README states each budget, window and lockout as a fact, and a
+        // reader adopting the presets reads the table rather than this module.
+        // The arithmetic above survives a changed number; the table does not, so
+        // the exact values are pinned here and a change to one has to change the
+        // README with it.
+        expect(recommendedAuthLimits.loginAttempts.limit).toBe(ASSUMED_UPSTREAM_REQUESTS_PER_MINUTE / 2);
+        expect(recommendedAuthLimits).toEqual({
+            loginAttempts: {limit: 10, windowMs: 60_000},
+            loginFailures: {limit: 5, windowMs: 15 * 60_000, lockoutMs: 15 * 60_000},
+            registrations: {limit: 3, windowMs: 60 * 60_000},
+            issuedCodes: {limit: 10, windowMs: 60 * 60_000}
+        });
+    });
+
     it('produces a working limiter when handed to the mechanism', () => {
         const limiter = new RateLimiter(recommendedAuthLimits.loginFailures);
+        const limit = recommendedAuthLimits.loginFailures.limit;
 
-        for (let i = 0; i < recommendedAuthLimits.loginFailures.limit; i++) {
+        for (let i = 0; i < limit - 1; i++) {
             expect(limiter.consume('203.0.113.7', START).allowed).toBe(true);
         }
+        // The last failure the budget allows lands ten minutes into the window,
+        // so the lockout it arms outlasts the window by ten minutes. With the
+        // window and the lockout both fifteen minutes long and armed at the same
+        // instant, the two would expire together and nothing here could tell
+        // which one was holding the key shut.
+        expect(limiter.consume('203.0.113.7', START + 10 * 60_000).allowed).toBe(true);
+        expect(limiter.consume('203.0.113.7', START + 10 * 60_000).allowed).toBe(false);
 
-        expect(limiter.consume('203.0.113.7', START).allowed).toBe(false);
-        // And the lockout, not merely the window, is what holds it shut.
-        expect(limiter.consume('203.0.113.7', START + 16 * 60_000).allowed).toBe(true);
+        // Twenty minutes in, the window is over and only the lockout remains.
+        const stillLocked = limiter.consume('203.0.113.7', START + 20 * 60_000);
+        expect(stillLocked.allowed).toBe(false);
+        expect(stillLocked.retryAfterSeconds).toBe(5 * 60);
+
+        expect(limiter.consume('203.0.113.7', START + 25 * 60_000).allowed).toBe(true);
     });
 });
