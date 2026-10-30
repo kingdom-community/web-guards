@@ -94,6 +94,58 @@ describe('RateLimiter', () => {
     });
 });
 
+describe('what overflowing the key map forgets', () => {
+    // The README's "What the limiter cannot do" names this trade: past `maxKeys`,
+    // expired entries are swept first, and only if that is not enough is every
+    // counter cleared, live lockouts included. The size bound above says nothing
+    // about WHICH counters go, so these pin it. A change to either half belongs
+    // in the README bullet in the same commit.
+
+    it('holds exactly maxKeys without forgetting anything', () => {
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000, lockoutMs: 900_000, maxKeys: 2});
+        limiter.consume('locked', START);
+        limiter.consume('locked', START);
+        limiter.consume('other', START);
+
+        expect(limiter.size()).toBe(2);
+        expect(limiter.check('locked', START).allowed).toBe(false);
+    });
+
+    it('sweeps an expired counter first and spares a lockout that outlives its window', () => {
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000, lockoutMs: 900_000, maxKeys: 2});
+        limiter.consume('locked', START);
+        limiter.consume('locked', START);
+        limiter.consume('stale', START);
+
+        // A minute on, both windows are over, but only `stale` is free to go:
+        // `locked` is still serving its fifteen minutes. Sweeping `stale` brings
+        // the map back to the bound, so nothing else is cleared.
+        limiter.consume('fresh', START + 61_000);
+
+        expect(limiter.size()).toBe(2);
+        const decision = limiter.check('locked', START + 61_000);
+        expect(decision.allowed).toBe(false);
+        expect(decision.retryAfterSeconds).toBe(839);
+    });
+
+    it('clears every counter, a live lockout included, when the sweep frees nothing', () => {
+        // The documented cost of the bound: a caller who can present more
+        // distinct addresses than maxKeys inside one window resets every budget,
+        // their own lockout with the rest. Asserted so that the trade stays the
+        // one the README describes, not because it is desirable.
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000, lockoutMs: 900_000, maxKeys: 2});
+        limiter.consume('locked', START);
+        limiter.consume('locked', START);
+        limiter.consume('other', START);
+        expect(limiter.check('locked', START + 1_000).allowed).toBe(false);
+
+        limiter.consume('newcomer', START + 1_000);
+
+        expect(limiter.size()).toBe(0);
+        expect(limiter.check('locked', START + 1_000).allowed).toBe(true);
+    });
+});
+
 describe('the injected clock', () => {
     // The clock is a constructor-free seam: every method takes `now`, so the
     // limiter has no timers, no `Date.now()` in a hot path, and no test that
