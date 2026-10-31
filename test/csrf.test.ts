@@ -132,6 +132,68 @@ describe('fail-closed edge one: neither Origin nor Referer', () => {
     });
 });
 
+describe('a header that arrives as more than one value', () => {
+    // `OriginCheckInput` admits an array for either header, and a runtime or a
+    // proxy that merges repeats can hand over one comma-joined string instead.
+    // The rule for an array is that its FIRST entry is the header; the cases
+    // below pin that rule from every side, so that a change to it — to the last
+    // entry, or to "any entry matches" — shows up as a failing test rather than
+    // as a quietly different control.
+    //
+    // First-entry-wins is not an opening for the attacker this module exists to
+    // stop. A cross-origin page cannot set `Origin` or add a second copy of it;
+    // the browser writes exactly one. A client that can write its own headers
+    // can write a single same-origin `Origin` just as easily, so a second copy
+    // gives it nothing it did not already have.
+
+    it('judges an array-valued Origin by its first entry', () => {
+        expect(checkRequestOrigin({origin: ['https://evil.example', BASE_URL], baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'mismatched-origin'});
+        expect(checkRequestOrigin({origin: [BASE_URL, 'https://evil.example'], baseUrl: BASE_URL}))
+            .toEqual({ok: true});
+    });
+
+    it('does not let a same-origin entry later in the array rescue a blank first one', () => {
+        // A blank first entry is the empty header, and the empty header is no
+        // header: the verdict is missing-origin, not a search through the rest.
+        expect(checkRequestOrigin({origin: ['', BASE_URL], baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+        expect(checkRequestOrigin({origin: ['null', BASE_URL], baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+    });
+
+    it('falls back to Referer past an array-valued Origin whose first entry is unusable', () => {
+        // The same fallback a plain empty Origin gets — the array changes
+        // nothing about which header is consulted next.
+        expect(checkRequestOrigin({origin: ['', BASE_URL], referer: `${BASE_URL}/login`, baseUrl: BASE_URL}))
+            .toEqual({ok: true});
+        expect(checkRequestOrigin({
+            origin: ['', BASE_URL],
+            referer: 'https://evil.example/page',
+            baseUrl: BASE_URL
+        })).toEqual({ok: false, reason: 'mismatched-origin'});
+    });
+
+    it('judges an array-valued Referer by its first entry', () => {
+        expect(checkRequestOrigin({referer: ['https://evil.example/page', `${BASE_URL}/login`], baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'mismatched-origin'});
+        expect(checkRequestOrigin({referer: [`${BASE_URL}/login`, 'https://evil.example/page'], baseUrl: BASE_URL}))
+            .toEqual({ok: true});
+    });
+
+    it('REFUSES two origins joined into one string, in either order', () => {
+        // `https://a, https://b` does not parse as a URL — the space lands in
+        // the host — so the joined form is no origin at all. It is refused as
+        // missing rather than read as either of the two values inside it.
+        expect(checkRequestOrigin({origin: `${BASE_URL}, https://evil.example`, baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+        expect(checkRequestOrigin({origin: `https://evil.example, ${BASE_URL}`, baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+        expect(checkRequestOrigin({origin: `${BASE_URL}, ${BASE_URL}`, baseUrl: BASE_URL}))
+            .toEqual({ok: false, reason: 'missing-origin'});
+    });
+});
+
 describe('fail-closed edge two: the base URL is unset', () => {
     // The more dangerous of the two, because it is a deploy-time mistake rather
     // than a request-time one. A site that reads its own base URL from
