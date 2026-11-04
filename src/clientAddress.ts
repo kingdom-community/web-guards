@@ -51,6 +51,13 @@
 // and they should be verified rather than assumed. A rate limiter keyed on the
 // wrong value is not a weaker limiter; it is a limiter that either does nothing
 // or takes the site down, and it reports neither.
+//
+// THE ADDRESS IS RETURNED AS SPELLED, AND IS ONE ADDRESS RATHER THAN ONE NETWORK.
+//
+// Nothing here masks or canonicalises it, so a limiter keyed on the result gives
+// each IPv6 address its own budget — and an IPv6 caller is commonly handed a /64
+// or more. That is a trade the README's limiter section records, with what to do
+// about it, rather than something this function solves.
 
 export interface AddressSource {
     headers: Record<string, string | string[] | undefined>;
