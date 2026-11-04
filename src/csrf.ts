@@ -104,8 +104,9 @@ export const checkRequestOrigin = (input: OriginCheckInput): OriginVerdict => {
     return declared === expected ? {ok: true} : {ok: false, reason: 'mismatched-origin'};
 };
 
-// What the caller is told. Deliberately three different status codes, because
-// they are three different problems: 503 is ours to fix, 403 is theirs.
+// What the caller is told. The three refusals share two status codes, because
+// there are two parties who can fix one: 503 is ours, and the two reasons that
+// are theirs are both 403. The reason stays in the verdict for whoever logs it.
 export const originVerdictStatus = (verdict: OriginVerdict): number => {
     if (verdict.ok) {
         return 200;

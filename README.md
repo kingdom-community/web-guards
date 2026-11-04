@@ -150,7 +150,7 @@ cases. Your application supplies two values:
 Name the environment variables whatever you like. `PUBLIC_BASE_URL` and
 `OAUTH_STATE_SECRET` are used in the examples.
 
-Two notes worth putting in your own deployment docs:
+Three notes worth putting in your own deployment docs:
 
 - **The base URL must be set in local development too.** Everything else in your
   codebase probably falls back to `http://localhost:3000` when it is missing —
@@ -160,6 +160,11 @@ Two notes worth putting in your own deployment docs:
 - **If your framework inlines public variables at build time** — anything named
   `NEXT_PUBLIC_*`, `VITE_*`, and so on — then a missing base URL is baked into an
   *image*, not fixable by restarting a container. The 503 says so.
+- **Nothing measures the signing secret.** The 32 bytes above are yours to
+  provide: `issueState` and `verifyState` refuse an unset or whitespace-only
+  secret and sign with anything else, however short. Starting a flow hands the
+  caller a state and its signature, so a guessable secret can be attacked offline
+  by any account that can start one. Generate it; do not choose it.
 
 ## What the origin check refuses, and why
 
@@ -321,6 +326,15 @@ limiter somebody will trust for something it cannot do:
   that an address-rich caller grows until the process runs out of memory, which
   is worse. Raise `maxKeys` if your traffic needs more headroom than the
   default.
+- **A key is one exact address, and an IPv6 address is a cheap one.**
+  `clientAddress` returns the address as the proxy spelled it and the limiter
+  matches that string exactly; nothing groups addresses into a network. An IPv4
+  caller usually has one address to spend. An IPv6 caller is commonly handed a
+  whole /64 or more, and every address in it is a fresh budget and a fresh
+  failed-login lockout — and, past `maxKeys` of them, the reset described above.
+  If your site is reachable over IPv6, mask the key to its network prefix before
+  passing it to the limiter, or have your proxy write the prefix into
+  `X-Real-Ip`, which is taken whole.
 
 If any of those is disqualifying for your site, you want a limiter backed by
 Redis. This one is for the case where you have one small container and would

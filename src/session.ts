@@ -363,9 +363,11 @@ export const createSessionCookieRules = (options: SessionCookieOptions = {}): Se
         sessionCookieName: settings.sessionCookieName,
         refreshCookieName: settings.refreshCookieName,
         maxAgeFor: (expiresAt, now = Date.now()) => ageFor(expiresAt, now),
-        // Returned as a list because both cookies are always written together —
-        // a rotated refresh token with a stale access token is a session that
-        // half-works.
+        // Returned as a list because a refresh token, when the upstream issued
+        // one, is always written together with the session cookie — a rotated
+        // refresh token with a stale access token is a session that half-works.
+        // With none issued, only the session cookie is written, and any refresh
+        // cookie the browser already holds is left as it was.
         issued: (session, now = Date.now()) => {
             // Both values are checked BEFORE either header is built, so a bad
             // refresh token cannot leave a caller holding a session cookie it

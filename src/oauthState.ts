@@ -117,6 +117,9 @@ const bindsToNothing = (subject: unknown): boolean =>
 // there is nobody to start a link for, and the answer belongs on the sign-in
 // path rather than at the provider.
 //
+// The secret's strength is not measured: anything non-blank signs. The README's
+// 32 bytes is the caller's to provide, and this check is only for its absence.
+//
 // One null for both is not an ambiguity the caller has to live with. It holds
 // both arguments and can tell them apart before it ever calls: a secret it did
 // not configure is its own deployment, a subject it does not have is its own

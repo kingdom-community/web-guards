@@ -107,7 +107,8 @@ export const originVerdictFor = (
 // Enforce the origin check on a state-changing route. Returns true when the
 // request was refused and the route must stop.
 //
-// The three outcomes answer differently on purpose:
+// The three refusals fall on two sides on purpose, and the two 403s are the same
+// answer to the caller, who learns nothing from which one it was:
 //   * `not-configured` is 503 and is OURS: the site was deployed without its own
 //     base URL, so the control cannot be applied and the route is disabled
 //     rather than left unguarded. The log line names the setting, because a
