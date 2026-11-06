@@ -64,6 +64,36 @@ describe('the session cookies', () => {
         }
     });
 
+    // The hatch reads as a boolean and arrives from configuration, where it is a
+    // string: `ALLOW_UNPREFIXED_COOKIES=false` hands this module `'false'`, which
+    // is truthy. A setting that says no must not waive the check, so only `true`
+    // opens the hatch, and everything else meets the ordinary refusal.
+    it('REFUSES an unprefixed name for every value of the hatch except true', () => {
+        const notTrue: unknown[] = [
+            'false', 'true', 'no', '0', '', '   ', 1, 0, [], ['true'], {}, false, null, undefined
+        ];
+
+        for (const value of notTrue) {
+            const options = {
+                sessionCookieName: 'session',
+                refreshCookieName: 'refresh',
+                allowCookieNamesWithoutHostPrefix: value
+            } as unknown as SessionCookieOptions;
+
+            expect(() => createSessionCookieRules(options)).toThrow(/does not start with "__Host-"/);
+        }
+    });
+
+    it('leaves a prefixed name alone whatever the hatch was given', () => {
+        // The hatch only decides anything for a name that lacks the prefix, so a
+        // stray value beside the default names is not a reason to refuse to start.
+        const prefixed = createSessionCookieRules({
+            allowCookieNamesWithoutHostPrefix: 'false'
+        } as unknown as SessionCookieOptions);
+
+        expect(prefixed.sessionCookieName).toBe('__Host-session');
+    });
+
     it('carry every attribute the __Host- prefix requires', () => {
         const [session, refresh] = rules.issued(
             {token: 'jwt-value', expiresAt: '2026-08-30T13:00:00Z', refreshToken: 'refresh-value'},

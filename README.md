@@ -222,7 +222,9 @@ There is one opt-out, `allowCookieNamesWithoutHostPrefix: true`, and it is named
 so that it can be searched for and refused in review. Its only legitimate use is
 a deployment that cannot serve over HTTPS or another trustworthy origin, where
 the browser would reject a `__Host-` cookie anyway. It waives the prefix and
-nothing else: the name and value checks below still apply.
+nothing else: the name and value checks below still apply. Only the boolean
+`true` turns it on, so an environment variable set to `false`, which arrives as
+a non-empty string, leaves the check in force.
 
 That guarantee also has to survive the values passed *through* it. A `Set-Cookie`
 header is a value followed by `;`-separated attributes, so a `;` inside a token
