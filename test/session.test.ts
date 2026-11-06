@@ -85,8 +85,8 @@ describe('the session cookies', () => {
     });
 
     it('leaves a prefixed name alone whatever the hatch was given', () => {
-        // The hatch is only consulted for a name that needs it, so a stray value
-        // beside the default names is not a reason to refuse to start.
+        // The hatch only decides anything for a name that lacks the prefix, so a
+        // stray value beside the default names is not a reason to refuse to start.
         const prefixed = createSessionCookieRules({
             allowCookieNamesWithoutHostPrefix: 'false'
         } as unknown as SessionCookieOptions);
