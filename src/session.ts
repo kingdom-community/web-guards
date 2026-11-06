@@ -34,7 +34,8 @@
 // refuses a cookie name without the prefix rather than letting the guarantee
 // quietly become a convention. The one way past that refusal is the explicit
 // `allowCookieNamesWithoutHostPrefix` option below, named so that review can
-// find it; it waives the prefix and nothing else.
+// find it; it waives the prefix and nothing else, and only the boolean `true`
+// turns it on.
 //
 // THE NAME AND THE VALUE ARE BOTH CHECKED, BECAUSE A `;` ENDS EITHER ONE.
 //
@@ -157,7 +158,7 @@ export interface SessionCookieOptions {
     // trustworthy origin, where the browser would reject a `__Host-` cookie
     // regardless. Anything else that reaches for this is trying to add a
     // `Domain=` attribute, which is the exact mistake the prefix is here to
-    // prevent.
+    // prevent. Exactly `true`, not merely truthy: see `assertHostPrefixed`.
     allowCookieNamesWithoutHostPrefix?: boolean;
 }
 
@@ -305,8 +306,12 @@ const assertCookieValueIsOctets = (cookieName: string, value: string): void => {
     );
 };
 
+// `=== true` rather than truthiness, because this option is read from
+// configuration by callers the `boolean` type does not reach. An environment
+// variable set to `false` arrives as the string `'false'`, which is truthy, and
+// a setting that says no must not switch the refusal off.
 const assertHostPrefixed = (name: string, allowed: boolean): void => {
-    if (allowed || name.startsWith(HOST_COOKIE_PREFIX)) {
+    if (allowed === true || name.startsWith(HOST_COOKIE_PREFIX)) {
         return;
     }
     throw new Error(
