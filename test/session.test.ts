@@ -226,6 +226,30 @@ describe('a lifetime that cannot be written as Max-Age is refused, not dropped',
         }
     });
 
+    // `1e21` is a whole number, and it is also where JavaScript stops writing
+    // numbers as digits: it interpolates as `Max-Age=1e+21`, which a browser
+    // ignores exactly as it ignores `Max-Age=NaN`. `Number('1e21')` from an
+    // environment variable is all it takes.
+    it('REFUSES a whole number too large to be written as a run of digits', () => {
+        for (const option of LIFETIMES) {
+            for (const value of [2 ** 53, 1e21, Number.MAX_VALUE]) {
+                expect(() => createSessionCookieRules(withLifetime(option, value)))
+                    .toThrow(new RegExp(`${option} must be a whole number of seconds`));
+            }
+        }
+        expect(() => maxAgeFor(null, NOW, {fallbackMaxAgeSeconds: 1e21}))
+            .toThrow(/fallbackMaxAgeSeconds/);
+        expect(() => maxAgeFor('2026-08-30T13:00:00Z', NOW, {minMaxAgeSeconds: 1e21}))
+            .toThrow(/minMaxAgeSeconds/);
+    });
+
+    it('still writes the largest lifetime it accepts as plain digits', () => {
+        const longest = createSessionCookieRules({refreshMaxAgeSeconds: Number.MAX_SAFE_INTEGER});
+
+        expect(longest.issued({token: 'jwt', refreshToken: 'r'}, NOW)[1])
+            .toMatch(/; Max-Age=9007199254740991$/);
+    });
+
     it('refuses the same values when maxAgeFor is called on its own', () => {
         expect(() => maxAgeFor(null, NOW, {fallbackMaxAgeSeconds: Number.NaN}))
             .toThrow(/fallbackMaxAgeSeconds/);
