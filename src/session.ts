@@ -213,12 +213,19 @@ const describeValue = (value: unknown): string =>
 // and anything else THROWS with the option named. Zero is refused as well: a
 // cookie written with `Max-Age=0` is deleted on arrival, which presents as
 // "login does nothing".
+//
+// `isSafeInteger` rather than `isInteger`, because being whole is not the same
+// as being writable. `1e21` is an integer, and from there up a number interpolates
+// in exponent form, so the header would read `Max-Age=1e+21` — not a run of
+// digits, and ignored like the rest. Everything from 2^53 is refused, which covers
+// all of those and also the integers too large to hold exactly.
 const requireSeconds = (option: LifetimeOption, value: unknown): number => {
-    if (typeof value === 'number' && Number.isInteger(value) && value >= 1) {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) {
         return value;
     }
     throw new Error(
-        `Session cookie option ${option} must be a whole number of seconds, at least 1, but was `
+        `Session cookie option ${option} must be a whole number of seconds, at least 1 and at `
+        + `most ${Number.MAX_SAFE_INTEGER}, but was `
         + `${describeValue(value)}. A browser ignores a Max-Age it cannot read and keeps the `
         + 'cookie with no expiry at all, so the cookie is not written rather than written '
         + 'unbounded. If the value comes from an environment variable, check that it is set '
