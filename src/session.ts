@@ -258,8 +258,10 @@ export const maxAgeFor = (
     // reaches the header through this subtraction. A clock of NaN makes the
     // result NaN, and `Math.max` passes NaN through, so the header would read
     // `Max-Age=NaN` — the unbounded cookie described above `requireSeconds`.
-    // An infinite or absurdly large clock is the same failure spelled
-    // `Infinity` or `1e+297`. So a remaining lifetime that is not a safe
+    // A clock infinitely or absurdly far BEHIND the expiry is the same failure
+    // spelled `Infinity` or `1e+297`. One as far AHEAD of it would come out as
+    // the floor, which is writable but hides a clock that is plainly broken,
+    // so it is refused alongside. A remaining lifetime that is not a safe
     // integer means the clock cannot be read, and that THROWS rather than
     // being written.
     if (!Number.isSafeInteger(remaining)) {
