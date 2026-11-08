@@ -149,6 +149,23 @@ describe('verifying a state', () => {
         expect(verifyState(state, 'alice', SECRET, 1_040_000)).toEqual({ok: false, reason: 'expired'});
     });
 
+    it('REFUSES every state against a clock that cannot be read, rather than letting none expire', () => {
+        // Every comparison with NaN is false, so `e <= now` against a NaN clock
+        // said "not expired" for a state issued long ago. A caller's own clock
+        // from `Date.parse` on a bad string is all it takes. The state below
+        // expired decades before any real clock, so only the NaN can save it.
+        const longExpired = issueState('alice', SECRET, 1_000_000) as string;
+
+        expect(verifyState(longExpired, 'alice', SECRET, Number.NaN)).toEqual({ok: false, reason: 'expired'});
+        expect(verifyState(longExpired, 'alice', SECRET, Date.parse('not a date')))
+            .toEqual({ok: false, reason: 'expired'});
+        // A live one is refused too: a clock that cannot be read cannot say it
+        // is live either.
+        const live = issueState('alice', SECRET) as string;
+        expect(verifyState(live, 'alice', SECRET, Number.NaN)).toEqual({ok: false, reason: 'expired'});
+        expect(verifyState(live, 'alice', SECRET)).toEqual({ok: true, subject: 'alice'});
+    });
+
     it('rejects everything when the secret is unset, rather than accepting anything', () => {
         const state = issueState('alice', SECRET) as string;
 

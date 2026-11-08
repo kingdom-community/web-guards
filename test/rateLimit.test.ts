@@ -184,6 +184,32 @@ describe('the injected clock', () => {
 
         expect(limiter.check('a', START - 5_000).allowed).toBe(false);
     });
+
+    it('a clock that cannot be read keeps counting and refuses at the limit', () => {
+        // Every comparison with NaN is false. Spelled the obvious way, "is the
+        // window still open" came out false on every call, so each consume
+        // started a fresh bucket at a count of one and a limit of two or more
+        // never refused anything. A caller's own clock from `Date.parse` on a
+        // bad string is all it takes.
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000});
+
+        expect(limiter.consume('a', Number.NaN).allowed).toBe(true);
+        expect(limiter.consume('a', Number.NaN).allowed).toBe(true);
+        expect(limiter.consume('a', Number.NaN).allowed).toBe(false);
+        expect(limiter.consume('a', Date.parse('not a date')).allowed).toBe(false);
+        // The refusal is per key, as every other refusal is.
+        expect(limiter.consume('b', Number.NaN).allowed).toBe(true);
+    });
+
+    it('a clock that cannot be read does not lift a lockout armed under it', () => {
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000, lockoutMs: 900_000});
+
+        limiter.consume('a', Number.NaN);
+        limiter.consume('a', Number.NaN);
+
+        expect(limiter.consume('a', Number.NaN).allowed).toBe(false);
+        expect(limiter.check('a', Number.NaN).allowed).toBe(false);
+    });
 });
 
 describe('a budget that cannot be applied is refused at startup', () => {

@@ -258,6 +258,31 @@ describe('a lifetime that cannot be written as Max-Age is refused, not dropped',
         expect(maxAgeFor(null, NOW, {fallbackMaxAgeSeconds: undefined})).toBe(3600);
     });
 
+    // The clock is the one input `requireSeconds` never sees. `Math.max` passes
+    // NaN through, so a NaN clock against an expiry that parses used to come
+    // out as `Max-Age=NaN` — the unbounded cookie this block exists to prevent,
+    // arriving through `now` instead of through an option.
+    it('REFUSES a clock that would make the lifetime unwritable, rather than writing Max-Age=NaN', () => {
+        const expiry = '2026-08-30T13:00:00Z';
+        for (const clock of [Number.NaN, Date.parse('not a date'), -Infinity, Infinity, -1e300, 1e300]) {
+            expect(() => maxAgeFor(expiry, clock)).toThrow(/maxAgeFor was given a clock of/);
+            expect(() => rules.issued({token: 'jwt', expiresAt: expiry}, clock))
+                .toThrow(/maxAgeFor was given a clock of/);
+        }
+        // Named in the error, so the log says what was wrong.
+        expect(() => maxAgeFor(expiry, Number.NaN)).toThrow(/a clock of NaN,/);
+        // The real clock and an ordinary injected one are unaffected.
+        expect(maxAgeFor(expiry, NOW)).toBe(3600);
+        expect(rules.issued({token: 'jwt', expiresAt: expiry}, NOW)[0]).toContain('Max-Age=3600');
+    });
+
+    it('does not consult the clock when there is no expiry to subtract it from', () => {
+        // The fallback is a fixed, already-validated lifetime: the clock never
+        // reaches the header on this path, so a bad one has nothing to break.
+        expect(maxAgeFor(null, Number.NaN)).toBe(3600);
+        expect(maxAgeFor('not-a-timestamp', Number.NaN)).toBe(3600);
+    });
+
     it('still accepts a lifetime of one second', () => {
         const short = createSessionCookieRules({
             refreshMaxAgeSeconds: 1,
