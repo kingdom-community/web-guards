@@ -217,7 +217,12 @@ export const verifyState = (
     if (bindsToNothing(payload.u)) {
         return {ok: false, reason: 'unbound'};
     }
-    if (payload.e <= now) {
+    // Written as "not provably still live" rather than as `payload.e <= now`,
+    // because every comparison with NaN is false. A caller that hands in a
+    // clock of its own and gets NaN — `Date.parse` on a bad string is enough —
+    // would otherwise make no state ever expire. This way a clock that cannot
+    // be read refuses every state, and the log says `expired`.
+    if (!(payload.e > now)) {
         return {ok: false, reason: 'expired'};
     }
     // THE BINDING. Without this line the state is merely unforgeable, and an

@@ -253,7 +253,26 @@ export const maxAgeFor = (
     if (Number.isNaN(parsed)) {
         return fallback;
     }
-    return Math.max(floor, Math.floor((parsed - now) / 1000));
+    const remaining = Math.floor((parsed - now) / 1000);
+    // `now` is the one input here that `requireSeconds` never sees, and it
+    // reaches the header through this subtraction. A clock of NaN makes the
+    // result NaN, and `Math.max` passes NaN through, so the header would read
+    // `Max-Age=NaN` — the unbounded cookie described above `requireSeconds`.
+    // A clock infinitely or absurdly far BEHIND the expiry is the same failure
+    // spelled `Infinity` or `1e+297`. One as far AHEAD of it would come out as
+    // the floor, which is writable but hides a clock that is plainly broken,
+    // so it is refused alongside. A remaining lifetime that is not a safe
+    // integer means the clock cannot be read, and that THROWS rather than
+    // being written.
+    if (!Number.isSafeInteger(remaining)) {
+        throw new Error(
+            `maxAgeFor was given a clock of ${describeValue(now)}, which cannot be subtracted `
+            + 'from an expiry to give a lifetime. A browser ignores a Max-Age it cannot read and '
+            + 'keeps the cookie with no expiry at all, so the cookie is not written rather than '
+            + 'written unbounded. Pass a time in milliseconds, or leave it out for the real clock.'
+        );
+    }
+    return Math.max(floor, remaining);
 };
 
 export interface SessionCookieRules {

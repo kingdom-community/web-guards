@@ -143,9 +143,18 @@ export class RateLimiter {
             return refusal;
         }
 
+        // A fresh bucket only when the old one is PROVABLY spent: its window is
+        // over and no lockout is running. Spelled as negated `>=` and `>` rather
+        // than as `<` and `<=`, which agree on every number but not on NaN —
+        // every comparison with NaN is false, the same property the constructor
+        // checks guard against. With the `<` spelling a clock of NaN started a
+        // new bucket at a count of one on every call and never refused anything;
+        // with this one it keeps counting and is refused at the limit.
         const existing = this.buckets.get(key);
         const bucket: Bucket =
-            existing && now - existing.windowStart < this.config.windowMs && existing.lockedUntil <= now
+            existing
+            && !(now - existing.windowStart >= this.config.windowMs)
+            && !(existing.lockedUntil > now)
                 ? {...existing, count: existing.count + 1}
                 : {windowStart: now, count: 1, lockedUntil: 0};
 
