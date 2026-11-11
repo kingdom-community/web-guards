@@ -58,7 +58,8 @@ export interface LimiterConfig {
 export interface Decision {
     allowed: boolean;
     // Seconds until the caller may try again. Zero when allowed. Suitable for a
-    // Retry-After header, which is where it goes.
+    // Retry-After header, which is where it goes. Always a whole number: when
+    // the clock cannot be read, it is the limiter's longest refusal instead.
     retryAfterSeconds: number;
 }
 
@@ -71,6 +72,17 @@ interface Bucket {
 }
 
 const seconds = (milliseconds: number): number => Math.max(1, Math.ceil(milliseconds / 1000));
+
+// The Retry-After hint for one refusal. Both refusals in `check` subtract the
+// injected clock, so a clock of NaN reaches `seconds` as NaN, and `Math.max`
+// passes NaN through rather than flooring it — the header would read
+// `Retry-After: NaN`, which is not a number a client can wait for, and the JSON
+// body would carry `null`. A wait that cannot be computed is answered with the
+// longest refusal this limiter is configured to impose instead. That is a hint,
+// not a promise: a caller who comes back early is refused again, so no value
+// here lets a request through.
+const retryAfter = (milliseconds: number, longestRefusalSeconds: number): number =>
+    Number.isFinite(milliseconds) ? seconds(milliseconds) : longestRefusalSeconds;
 
 const describeValue = (value: unknown): string =>
     typeof value === 'string' ? JSON.stringify(value) : String(value);
@@ -97,6 +109,9 @@ const requireNumber = (field: keyof LimiterConfig, value: unknown, minimum: numb
 export class RateLimiter {
     private readonly config: Required<LimiterConfig>;
     private readonly buckets = new Map<string, Bucket>();
+    // The Retry-After hint for a refusal whose wait cannot be computed. See
+    // `retryAfter`.
+    private readonly longestRefusalSeconds: number;
 
     constructor(config: LimiterConfig) {
         // Defaults through `??`, not a spread: a property that is present but
@@ -114,6 +129,7 @@ export class RateLimiter {
             lockoutMs: requireNumber('lockoutMs', config.lockoutMs === undefined ? 0 : config.lockoutMs, 0),
             maxKeys: requireNumber('maxKeys', config.maxKeys ?? 10000, 1)
         };
+        this.longestRefusalSeconds = seconds(Math.max(this.config.windowMs, this.config.lockoutMs));
     }
 
     // Whether this key would be served right now, WITHOUT spending anything.
@@ -124,13 +140,22 @@ export class RateLimiter {
             return ALLOWED;
         }
         if (bucket.lockedUntil > now) {
-            return {allowed: false, retryAfterSeconds: seconds(bucket.lockedUntil - now)};
+            return {
+                allowed: false,
+                retryAfterSeconds: retryAfter(bucket.lockedUntil - now, this.longestRefusalSeconds)
+            };
         }
         if (now - bucket.windowStart >= this.config.windowMs) {
             return ALLOWED;
         }
         if (bucket.count >= this.config.limit) {
-            return {allowed: false, retryAfterSeconds: seconds(bucket.windowStart + this.config.windowMs - now)};
+            return {
+                allowed: false,
+                retryAfterSeconds: retryAfter(
+                    bucket.windowStart + this.config.windowMs - now,
+                    this.longestRefusalSeconds
+                )
+            };
         }
         return ALLOWED;
     }
