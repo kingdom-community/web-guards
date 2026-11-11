@@ -210,6 +210,58 @@ describe('the injected clock', () => {
         expect(limiter.consume('a', Number.NaN).allowed).toBe(false);
         expect(limiter.check('a', Number.NaN).allowed).toBe(false);
     });
+
+    // A refusal under a clock that cannot be read still has to say how long to
+    // wait in a form Retry-After can carry. `Math.max(1, NaN)` is NaN, so the
+    // floor in the wait arithmetic does not hold here: unguarded, the header
+    // read `Retry-After: NaN` and the JSON body carried `null`. The hint falls
+    // back to the longest refusal the limiter is configured to impose. These
+    // assert the number itself, because "refused" was already true before.
+
+    it('a refusal under a clock that cannot be read waits for the window, not NaN', () => {
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000});
+        limiter.consume('a', Number.NaN);
+        limiter.consume('a', Number.NaN);
+
+        const refused = limiter.consume('a', Number.NaN);
+
+        expect(refused.allowed).toBe(false);
+        expect(refused.retryAfterSeconds).toBe(60);
+        expect(limiter.check('a', Number.NaN).retryAfterSeconds).toBe(60);
+    });
+
+    it('a refusal under a clock that cannot be read waits for the lockout when it is longer', () => {
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000, lockoutMs: 900_000});
+        limiter.consume('a', Number.NaN);
+        limiter.consume('a', Number.NaN);
+
+        const refused = limiter.consume('a', Number.NaN);
+
+        expect(refused.allowed).toBe(false);
+        expect(refused.retryAfterSeconds).toBe(900);
+    });
+
+    it('a lockout checked against an infinitely early clock waits for the lockout, not Infinity', () => {
+        // The other refusal: a lockout armed at a real time is still running
+        // against a clock of -Infinity, and the remaining wait is Infinity —
+        // `Retry-After: Infinity` without the guard.
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000, lockoutMs: 900_000});
+        limiter.consume('a', START);
+        limiter.consume('a', START);
+
+        const refused = limiter.check('a', Number.NEGATIVE_INFINITY);
+
+        expect(refused.allowed).toBe(false);
+        expect(refused.retryAfterSeconds).toBe(900);
+    });
+
+    it('a readable clock still gets the exact wait, not the fallback', () => {
+        const limiter = new RateLimiter({limit: 2, windowMs: 60_000, lockoutMs: 900_000});
+        limiter.consume('a', START);
+        limiter.consume('a', START);
+
+        expect(limiter.check('a', START + 300_000).retryAfterSeconds).toBe(600);
+    });
 });
 
 describe('a budget that cannot be applied is refused at startup', () => {
