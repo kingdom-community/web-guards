@@ -337,6 +337,16 @@ limiter somebody will trust for something it cannot do:
   If your site is reachable over IPv6, mask the key to its network prefix before
   passing it to the limiter, or have your proxy write the prefix into
   `X-Real-Ip`, which is taken whole.
+- **A key whose counter started under a clock that cannot be read stays
+  refused.** If the clock you pass in is ever `NaN` — `Date.parse` on a bad
+  string is enough — the limiter keeps counting rather than starting a fresh
+  budget on every call, and refuses at the limit. A counter started that way
+  records no usable start time, so no later clock can show its window is over:
+  once it has reached the limit, that key is refused after the clock recovers
+  too, until `reset()`, `clear()`, an overflow clear, or a restart removes it.
+  For a limiter you never `reset()` for that key (`loginAttempts`, say), that
+  means until the next restart. Leave the `now` argument off to use
+  `Date.now()`, which does not return `NaN`.
 
 If any of those is disqualifying for your site, you want a limiter backed by
 Redis. This one is for the case where you have one small container and would
