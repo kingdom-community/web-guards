@@ -175,6 +175,17 @@ export class RateLimiter {
         // checks guard against. With the `<` spelling a clock of NaN started a
         // new bucket at a count of one on every call and never refused anything;
         // with this one it keeps counting and is refused at the limit.
+        //
+        // The cost is on the other side. A bucket written under a NaN clock has
+        // a `windowStart` of NaN (and, with a lockout, a `lockedUntil` of NaN),
+        // so no later clock — however readable — ever proves its window over:
+        // `now - NaN >= windowMs` is false for every `now`. Once such a bucket
+        // reaches the limit, its key stays refused after the clock recovers,
+        // because `check` refuses before this replacement is reached and
+        // `evictIfOversized` never sweeps it. Only `reset`, `clear`, or the
+        // overflow clear removes it. That is fail-closed, not fail-open: no
+        // request is let through that should not be, but a limiter nothing
+        // resets keeps refusing that key until the process restarts.
         const existing = this.buckets.get(key);
         const bucket: Bucket =
             existing
