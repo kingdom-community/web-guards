@@ -176,7 +176,7 @@ export class RateLimiter {
         // new bucket at a count of one on every call and never refused anything;
         // with this one it keeps counting and is refused at the limit.
         //
-        // The cost is on the other side. A bucket written under a NaN clock has
+        // The cost is on the other side. A bucket STARTED under a NaN clock has
         // a `windowStart` of NaN (and, with a lockout, a `lockedUntil` of NaN),
         // so no later clock — however readable — ever proves its window over:
         // `now - NaN >= windowMs` is false for every `now`. Once such a bucket
