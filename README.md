@@ -159,7 +159,9 @@ Three notes worth putting in your own deployment docs:
   That loudness is the feature.
 - **If your framework inlines public variables at build time** — anything named
   `NEXT_PUBLIC_*`, `VITE_*`, and so on — then a missing base URL is baked into an
-  *image*, not fixable by restarting a container. The 503 says so.
+  *image*, not fixable by restarting a container. The log line written with the
+  503 says so; the 503 itself tells the visitor only that the site is not
+  configured.
 - **Nothing measures the signing secret.** The 32 bytes above are yours to
   provide: `issueState` and `verifyState` refuse an unset or whitespace-only
   secret and sign with anything else, however short. Starting a flow hands the
