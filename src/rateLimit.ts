@@ -186,6 +186,15 @@ export class RateLimiter {
         // overflow clear removes it. That is fail-closed, not fail-open: no
         // request is let through that should not be, but a limiter nothing
         // resets keeps refusing that key until the process restarts.
+        //
+        // The same spelling does NOT cover a lockout armed under a NaN clock on
+        // a bucket a readable clock started. The arming below computes
+        // `lockedUntil = NaN + lockoutMs`, which is NaN, and `lockedUntil > now`
+        // is false for every `now`, so the lockout never refuses anything. The
+        // bucket's `windowStart` is still finite, so the window check ends the
+        // refusal on time: the key is refused until the window rolls over, not
+        // for lockoutMs. That releases the lockout early, which fails open
+        // relative to the configuration. The README records it as a trade.
         const existing = this.buckets.get(key);
         const bucket: Bucket =
             existing
@@ -203,7 +212,8 @@ export class RateLimiter {
 
         // This attempt is allowed: it is the limit-th, not the limit-plus-first.
         // If it just armed the lockout, the NEXT one is refused — and refused for
-        // lockoutMs rather than until the window rolls over.
+        // lockoutMs rather than until the window rolls over, unless `now` was NaN
+        // (see above).
         return ALLOWED;
     }
 

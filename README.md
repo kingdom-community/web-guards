@@ -349,6 +349,14 @@ limiter somebody will trust for something it cannot do:
   For a limiter you never `reset()` for that key (`loginAttempts`, say), that
   means until the next restart. Leave the `now` argument off to use
   `Date.now()`, which does not return `NaN`.
+- **A lockout armed under a clock that cannot be read ends with the window.**
+  This is the opposite failure: it fails open. When a counter was started
+  under a readable clock and the call that reaches the limit passes `NaN`, the
+  lockout has no usable end time, so nothing enforces it. The key is still
+  refused until that counter's window ends, but not for `lockoutMs`. With
+  `loginFailures`, where the window and the lockout are both 15 minutes, the
+  lockout can end up to 15 minutes early, depending on how far into the window
+  it was armed. The same advice applies: leave `now` off.
 
 If any of those is disqualifying for your site, you want a limiter backed by
 Redis. This one is for the case where you have one small container and would
