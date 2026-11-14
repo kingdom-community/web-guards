@@ -191,10 +191,11 @@ export class RateLimiter {
         // a bucket a readable clock started. The arming below computes
         // `lockedUntil = NaN + lockoutMs`, which is NaN, and `lockedUntil > now`
         // is false for every `now`, so the lockout never refuses anything. The
-        // bucket's `windowStart` is still finite, so the window check ends the
-        // refusal on time: the key is refused until the window rolls over, not
-        // for lockoutMs. That releases the lockout early, which fails open
-        // relative to the configuration. The README records it as a trade.
+        // bucket's `windowStart` is still finite, so the window check still ends
+        // the refusal when the window rolls over: the key is refused until then,
+        // not for lockoutMs. That releases the lockout early, which fails open
+        // relative to the configuration. It is a known gap, not a chosen trade:
+        // the README documents it, and whether to close it is an open decision.
         const existing = this.buckets.get(key);
         const bucket: Bucket =
             existing
