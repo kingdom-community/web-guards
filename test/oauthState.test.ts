@@ -334,3 +334,54 @@ describe('a correctly signed payload of the wrong shape', () => {
         expect(verifyPayload({n: 'x', u: 'alice', e: null})).toEqual({ok: false, reason: 'malformed'});
     });
 });
+
+// The issuing end of the same row. `issueState` takes the clock and the lifetime
+// as parameters and writes their sum into the payload unchecked, so a NaN or an
+// Infinity there reaches `JSON.stringify` and comes out as `null`. The state is
+// still issued — non-null, correctly signed — but `verifyState` reads that
+// `null` as the wrong shape above and refuses it against every clock. These
+// cases pin that a lifetime nobody can compute is a state nobody can redeem,
+// and above all that an infinite lifetime does not become a state that never
+// expires.
+describe('a state issued with a clock or a lifetime that cannot be used', () => {
+    it('issues a state under a clock of NaN that no later clock redeems', () => {
+        // `Date.parse` on a bad string is enough to produce this clock.
+        const state = issueState('alice', SECRET, Date.parse('not a date'));
+
+        expect(state).not.toBeNull();
+        expect(verifyState(state as string, 'alice', SECRET, 1_000_000))
+            .toEqual({ok: false, reason: 'malformed'});
+        expect(verifyState(state as string, 'alice', SECRET)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyState(state as string, 'alice', SECRET, Number.NaN))
+            .toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('does not read an infinite lifetime as a state that never expires', () => {
+        // The fail-open shape this row exists to rule out. An expiry of
+        // Infinity would compare greater than every clock, so a state carrying
+        // one would be good forever. It never carries one: JSON writes it as
+        // null, and null is refused.
+        const forever = issueState('alice', SECRET, 1_000_000, Number.POSITIVE_INFINITY) as string;
+        const fromInfinity = issueState('alice', SECRET, Number.POSITIVE_INFINITY) as string;
+
+        expect(verifyState(forever, 'alice', SECRET, 1_000_001)).toEqual({ok: false, reason: 'malformed'});
+        expect(verifyState(fromInfinity, 'alice', SECRET, 1_000_001)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('refuses a state issued with a lifetime of NaN', () => {
+        const state = issueState('alice', SECRET, 1_000_000, Number.NaN) as string;
+
+        expect(verifyState(state, 'alice', SECRET, 1_000_001)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('issues a state with a zero or negative lifetime that is already expired', () => {
+        // These are finite, so they survive JSON and are judged as deadlines.
+        // A deadline of `now` is not after `now`, so even the moment of issue
+        // is too late.
+        const zero = issueState('alice', SECRET, 1_000_000, 0) as string;
+        const negative = issueState('alice', SECRET, 1_000_000, -60_000) as string;
+
+        expect(verifyState(zero, 'alice', SECRET, 1_000_000)).toEqual({ok: false, reason: 'expired'});
+        expect(verifyState(negative, 'alice', SECRET, 1_000_000)).toEqual({ok: false, reason: 'expired'});
+    });
+});
