@@ -120,6 +120,18 @@ const bindsToNothing = (subject: unknown): boolean =>
 // The secret's strength is not measured: anything non-blank signs. The README's
 // 32 bytes is the caller's to provide, and this check is only for its absence.
 //
+// Neither is the clock. `now + ttlMs` is written into the payload unchecked, so
+// a clock of NaN — `Date.parse` on a bad string is enough — or a lifetime of
+// NaN or Infinity makes an expiry that is not a finite number, and JSON writes
+// that as `null`. The state still comes back non-null and correctly signed, but
+// `verifyState` refuses an expiry that is not a number as `malformed`, against
+// every clock. That fails closed: a lifetime of Infinity can never become a
+// state that is good forever. The reason is the cost. A broken clock at
+// `verifyState` reports `expired`, but a broken clock HERE reports `malformed`,
+// which reads like a forged or probing request, and only after the browser has
+// already been sent to the provider. Leave `now` off to use `Date.now()`, which
+// does not return NaN.
+//
 // One null for both is not an ambiguity the caller has to live with. It holds
 // both arguments and can tell them apart before it ever calls: a secret it did
 // not configure is its own deployment, a subject it does not have is its own
