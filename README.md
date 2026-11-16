@@ -132,6 +132,8 @@ const verdict = verifyState(request.query.state, session.username, process.env.O
 if (!verdict.ok) {
     // 'wrong-session' is the attack; 'expired' is a person who left the tab
     // open; 'unbound' is a flow with no account on one side or the other.
+    // 'malformed' is usually a probe, but it is also what a state issued under
+    // a clock of NaN comes back as, so check any `now` you pass to issueState.
     // Different log lines, identical answer to the visitor.
 }
 ```
