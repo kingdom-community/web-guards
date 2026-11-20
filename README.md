@@ -255,7 +255,8 @@ names the option. That covers `NaN` from an unset environment variable, `0`
 (which deletes the cookie on arrival), `1.5`, and a numeric string. An option
 passed as `undefined` or `null` takes its default. For the same reason,
 `issued()` and `maxAgeFor()` throw rather than write a lifetime when the session
-carries an expiry and the `now` passed in cannot be subtracted from it: a clock
+carries an expiry that parses and the `now` passed in cannot be subtracted from
+it: a clock
 of `NaN`, or one so far from the expiry that the result is not a safe integer.
 Leave `now` off to use `Date.now()`.
 
