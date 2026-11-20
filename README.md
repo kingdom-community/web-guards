@@ -242,6 +242,24 @@ a technicality. The thrown error names the offending character and never repeats
 the value, because that value is a live session token and error messages end up
 in logs.
 
+The cookie lifetimes are checked as strictly, because a bad one fails just as
+quietly. The session cookie's `Max-Age` follows the expiry the upstream reported
+(`expiresAt`, anything `Date.parse` reads), never below `minMaxAgeSeconds` (60
+unless you set it), and falls back to `fallbackMaxAgeSeconds` (an hour) when
+there is no expiry or it does not parse. The refresh cookie gets
+`refreshMaxAgeSeconds` (30 days). A browser ignores a `Max-Age` that is not a run
+of digits and keeps the cookie with no expiry at all, so
+`createSessionCookieRules` throws at construction on any of the three that is not
+a whole number of seconds from 1 to `Number.MAX_SAFE_INTEGER`, and the error
+names the option. That covers `NaN` from an unset environment variable, `0`
+(which deletes the cookie on arrival), `1.5`, and a numeric string. An option
+passed as `undefined` or `null` takes its default. For the same reason,
+`issued()` and `maxAgeFor()` throw rather than write a lifetime when the session
+carries an expiry that parses and the `now` passed in cannot be subtracted from
+it: a clock
+of `NaN`, or one so far from the expiry that the result is not a safe integer.
+Leave `now` off to use `Date.now()`.
+
 (`Secure` cookies work on `http://localhost` in every current browser, so none of
 this costs you anything in local development.)
 
